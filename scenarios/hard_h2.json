@@ -1,0 +1,26 @@
+{
+  "scenario_id": "hard_h2",
+  "difficulty": "hard",
+  "step_budget": 10,
+  "description": "postgres_primary missing index causes slow queries, creating a self-amplifying retry storm.",
+  "initial_node_states": {
+    "api_gateway": {"status": "critical", "health": 0.12, "observable": true, "visible_symptoms": ["timeout_storm"]},
+    "auth_service": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "degraded", "health": 0.50, "observable": true, "visible_symptoms": ["slow_queries"]},
+    "order_service": {"status": "critical", "health": 0.08, "observable": true, "visible_symptoms": ["retry_storm_active", "db_connection_timeout"]},
+    "postgres_primary": {"status": "unknown", "health": 0.05, "observable": false, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.94, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "postgres_primary", "type": "missing_index_slow_query", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "postgres_primary",
+    "root_cause_type": "missing_index_slow_query",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "scale_replica", "target": "order_service"}, {"action": "drain_connections", "target": "postgres_primary"}]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "scenario_id": "medium_m2",
+  "difficulty": "medium",
+  "step_budget": 10,
+  "description": "redis_cache is full, causing order_service to bypass it and hammer postgres_primary.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.48, "observable": true, "visible_symptoms": ["high_error_rate"]},
+    "auth_service": {"status": "healthy", "health": 0.93, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.87, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "critical", "health": 0.12, "observable": true, "visible_symptoms": ["database_connection_timeout", "cache_bypass_mode_active"]},
+    "postgres_primary": {"status": "critical", "health": 0.08, "observable": true, "visible_symptoms": ["connection_pool_exhausted"]},
+    "redis_cache": {"status": "unknown", "health": 0.70, "observable": false, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "redis_cache", "type": "cache_full_eviction_disabled", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "redis_cache",
+    "root_cause_type": "cache_full_eviction_disabled",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "drain_connections", "target": "postgres_primary"}, {"action": "restart", "target": "postgres_primary"}]
+  }
+}

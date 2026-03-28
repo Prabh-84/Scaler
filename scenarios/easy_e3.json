@@ -1,0 +1,26 @@
+{
+  "scenario_id": "easy_e3",
+  "difficulty": "easy",
+  "step_budget": 7,
+  "description": "postgres_primary has connection pool exhaustion. product_service and order_service both fail.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.50, "observable": true, "visible_symptoms": ["elevated_error_rate"]},
+    "auth_service": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "critical", "health": 0.15, "observable": true, "visible_symptoms": ["database_connection_timeout"]},
+    "order_service": {"status": "critical", "health": 0.18, "observable": true, "visible_symptoms": ["database_connection_timeout"]},
+    "postgres_primary": {"status": "unknown", "health": 0.05, "observable": false, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "postgres_primary", "type": "connection_pool_exhaustion", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "postgres_primary",
+    "root_cause_type": "connection_pool_exhaustion",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "product_service"}, {"action": "restart", "target": "order_service"}]
+  }
+}

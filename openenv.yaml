@@ -1,0 +1,18 @@
+# name: cascade_debug_env
+# version: "0.1.0"
+# description: "A cascading failure diagnosis environment for SRE agents."
+# # This tells the system where to find your logic class
+# entry_point: "server.cascade_debug_env_environment:CascadeDebugEnv"
+# author: "Prabhjot Singh"
+# tags: ["openenv", "devops", "sre"]
+# openenv.yaml
+name: cascade-debug-env
+description: OpenEnv-compatible debugging environment for cascading distributed system diagnosis.
+entrypoints:
+  reset: /reset
+  step: /step
+  state: /state
+build:
+  dockerfile: Dockerfile
+server:
+  port: 7860

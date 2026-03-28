@@ -1,0 +1,14 @@
+# fastapi
+# uvicorn
+# pydantic
+# requests
+
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+requests
+python-dotenv
+openai
+pyyaml
+openenv-core

@@ -1,0 +1,26 @@
+{
+  "scenario_id": "medium_m1",
+  "difficulty": "medium",
+  "step_budget": 10,
+  "description": "product_service received a bad deployment. api_gateway shows a red herring memory warning.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.40, "observable": true, "visible_symptoms": ["high_latency", "memory_usage_warning"]},
+    "auth_service": {"status": "healthy", "health": 0.94, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "unknown", "health": 0.20, "observable": false, "visible_symptoms": []},
+    "order_service": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "postgres_primary": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "product_service", "type": "version_mismatch_blocking_call", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "product_service",
+    "root_cause_type": "version_mismatch_blocking_call",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "api_gateway"}, {"action": "drain_connections", "target": "api_gateway"}]
+  }
+}

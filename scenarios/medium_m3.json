@@ -1,0 +1,26 @@
+{
+  "scenario_id": "medium_m3",
+  "difficulty": "medium",
+  "step_budget": 11,
+  "description": "auth_service TLS certificate expired. Process is healthy but requests time out.",
+  "initial_node_states": {
+    "api_gateway": {"status": "critical", "health": 0.15, "observable": true, "visible_symptoms": ["thread_pool_exhausted"]},
+    "auth_service": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "degraded", "health": 0.40, "observable": true, "visible_symptoms": ["authentication_failures"]},
+    "order_service": {"status": "degraded", "health": 0.38, "observable": true, "visible_symptoms": ["authentication_failures"]},
+    "postgres_primary": {"status": "healthy", "health": 0.91, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.94, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "auth_service", "type": "tls_certificate_expired", "log_entry_on_observe": "ERROR TLS handshake failed: certificate expired.", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "auth_service",
+    "root_cause_type": "tls_certificate_expired",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "auth_service"}, {"action": "restart", "target": "api_gateway"}]
+  }
+}

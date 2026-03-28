@@ -1,0 +1,26 @@
+{
+  "scenario_id": "hard_h3",
+  "difficulty": "hard",
+  "step_budget": 14,
+  "description": "payment_gateway decoy masks a silent connection leak in user_db.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.55, "observable": true, "visible_symptoms": ["auth_slowdown_detected"]},
+    "auth_service": {"status": "degraded", "health": 0.60, "observable": true, "visible_symptoms": ["response_time_elevated"]},
+    "user_db": {"status": "unknown", "health": 0.35, "observable": false, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "healthy", "health": 0.85, "observable": true, "visible_symptoms": []},
+    "postgres_primary": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.93, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "critical", "health": 0.0, "observable": true, "visible_symptoms": ["connection_refused", "500_errors"]},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "user_db", "type": "connection_leak_gradual", "degradation_delay_steps": 1}
+  ],
+  "ground_truth": {
+    "root_cause_node": "user_db",
+    "root_cause_type": "connection_leak_gradual",
+    "optimal_steps": 5,
+    "trap_actions": [{"action": "observe", "target": "payment_gateway"}, {"action": "restart", "target": "payment_gateway"}]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "scenario_id": "hard_h1",
+  "difficulty": "hard",
+  "step_budget": 12,
+  "description": "Two independent failures: redis_cache crash AND postgres_replica lag.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.45, "observable": true, "visible_symptoms": ["elevated_error_rate"]},
+    "auth_service": {"status": "healthy", "health": 0.93, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "degraded", "health": 0.42, "observable": true, "visible_symptoms": ["stale_data_responses"]},
+    "order_service": {"status": "critical", "health": 0.10, "observable": true, "visible_symptoms": ["cache_unavailable", "order_creation_failed"]},
+    "postgres_primary": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "postgres_replica": {"status": "unknown", "health": 0.15, "observable": false, "visible_symptoms": []},
+    "redis_cache": {"status": "unknown", "health": 0.0, "observable": false, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "redis_cache", "type": "process_crash", "degradation_delay_steps": 0},
+    {"node": "postgres_replica", "type": "replication_lag_critical", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "redis_cache",
+    "root_cause_type": "process_crash",
+    "secondary_root_cause": {"node": "postgres_replica", "type": "replication_lag_critical"},
+    "optimal_steps": 8,
+    "trap_actions": [{"action": "restart", "target": "postgres_primary"}]
+  }
+}

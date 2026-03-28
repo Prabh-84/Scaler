@@ -1,0 +1,26 @@
+{
+  "scenario_id": "easy_e2",
+  "difficulty": "easy",
+  "step_budget": 6,
+  "description": "redis_cache has a memory leak. order_service is showing slow responses.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.60, "observable": true, "visible_symptoms": ["slow_response_times"]},
+    "auth_service": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "degraded", "health": 0.35, "observable": true, "visible_symptoms": ["high_latency", "timeout_errors"]},
+    "postgres_primary": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "unknown", "health": 0.05, "observable": false, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "redis_cache", "type": "memory_leak", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "redis_cache",
+    "root_cause_type": "memory_leak",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "order_service"}, {"action": "scale_replica", "target": "order_service"}]
+  }
+}
