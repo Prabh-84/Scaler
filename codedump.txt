@@ -1,0 +1,2066 @@
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\easy_e1.json =====
+
+{
+  "scenario_id": "easy_e1",
+  "difficulty": "easy",
+  "step_budget": 5,
+  "description": "auth_service has crashed. api_gateway is throwing 401 errors.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.45, "observable": true, "visible_symptoms": ["401_errors", "elevated_error_rate"]},
+    "auth_service": {"status": "unknown", "health": 0.0, "observable": false, "visible_symptoms": []},
+    "user_db": {"status": "unknown", "health": 0.95, "observable": false, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "postgres_primary": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "auth_service", "type": "process_crash", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "auth_service",
+    "root_cause_type": "process_crash",
+    "optimal_steps": 3,
+    "trap_actions": []
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\easy_e2.json =====
+
+{
+  "scenario_id": "easy_e2",
+  "difficulty": "easy",
+  "step_budget": 6,
+  "description": "redis_cache has a memory leak. order_service is showing slow responses.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.60, "observable": true, "visible_symptoms": ["slow_response_times"]},
+    "auth_service": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "degraded", "health": 0.35, "observable": true, "visible_symptoms": ["high_latency", "timeout_errors"]},
+    "postgres_primary": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "unknown", "health": 0.05, "observable": false, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "redis_cache", "type": "memory_leak", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "redis_cache",
+    "root_cause_type": "memory_leak",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "order_service"}, {"action": "scale_replica", "target": "order_service"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\easy_e3.json =====
+
+{
+  "scenario_id": "easy_e3",
+  "difficulty": "easy",
+  "step_budget": 7,
+  "description": "postgres_primary has connection pool exhaustion. product_service and order_service both fail.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.50, "observable": true, "visible_symptoms": ["elevated_error_rate"]},
+    "auth_service": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "critical", "health": 0.15, "observable": true, "visible_symptoms": ["database_connection_timeout"]},
+    "order_service": {"status": "critical", "health": 0.18, "observable": true, "visible_symptoms": ["database_connection_timeout"]},
+    "postgres_primary": {"status": "unknown", "health": 0.05, "observable": false, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "postgres_primary", "type": "connection_pool_exhaustion", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "postgres_primary",
+    "root_cause_type": "connection_pool_exhaustion",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "product_service"}, {"action": "restart", "target": "order_service"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\hard_h1.json =====
+
+{
+  "scenario_id": "hard_h1",
+  "difficulty": "hard",
+  "step_budget": 12,
+  "description": "Two independent failures: redis_cache crash AND postgres_replica lag.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.45, "observable": true, "visible_symptoms": ["elevated_error_rate"]},
+    "auth_service": {"status": "healthy", "health": 0.93, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "degraded", "health": 0.42, "observable": true, "visible_symptoms": ["stale_data_responses"]},
+    "order_service": {"status": "critical", "health": 0.10, "observable": true, "visible_symptoms": ["cache_unavailable", "order_creation_failed"]},
+    "postgres_primary": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "postgres_replica": {"status": "unknown", "health": 0.15, "observable": false, "visible_symptoms": []},
+    "redis_cache": {"status": "unknown", "health": 0.0, "observable": false, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "redis_cache", "type": "process_crash", "degradation_delay_steps": 0},
+    {"node": "postgres_replica", "type": "replication_lag_critical", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "redis_cache",
+    "root_cause_type": "process_crash",
+    "secondary_root_cause": {"node": "postgres_replica", "type": "replication_lag_critical"},
+    "optimal_steps": 8,
+    "trap_actions": [{"action": "restart", "target": "postgres_primary"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\hard_h2.json =====
+
+{
+  "scenario_id": "hard_h2",
+  "difficulty": "hard",
+  "step_budget": 10,
+  "description": "postgres_primary missing index causes slow queries, creating a self-amplifying retry storm.",
+  "initial_node_states": {
+    "api_gateway": {"status": "critical", "health": 0.12, "observable": true, "visible_symptoms": ["timeout_storm"]},
+    "auth_service": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "degraded", "health": 0.50, "observable": true, "visible_symptoms": ["slow_queries"]},
+    "order_service": {"status": "critical", "health": 0.08, "observable": true, "visible_symptoms": ["retry_storm_active", "db_connection_timeout"]},
+    "postgres_primary": {"status": "unknown", "health": 0.05, "observable": false, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.94, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "postgres_primary", "type": "missing_index_slow_query", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "postgres_primary",
+    "root_cause_type": "missing_index_slow_query",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "scale_replica", "target": "order_service"}, {"action": "drain_connections", "target": "postgres_primary"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\hard_h3.json =====
+
+{
+  "scenario_id": "hard_h3",
+  "difficulty": "hard",
+  "step_budget": 14,
+  "description": "payment_gateway decoy masks a silent connection leak in user_db.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.55, "observable": true, "visible_symptoms": ["auth_slowdown_detected"]},
+    "auth_service": {"status": "degraded", "health": 0.60, "observable": true, "visible_symptoms": ["response_time_elevated"]},
+    "user_db": {"status": "unknown", "health": 0.35, "observable": false, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "healthy", "health": 0.85, "observable": true, "visible_symptoms": []},
+    "postgres_primary": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.93, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "critical", "health": 0.0, "observable": true, "visible_symptoms": ["connection_refused", "500_errors"]},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "user_db", "type": "connection_leak_gradual", "degradation_delay_steps": 1}
+  ],
+  "ground_truth": {
+    "root_cause_node": "user_db",
+    "root_cause_type": "connection_leak_gradual",
+    "optimal_steps": 5,
+    "trap_actions": [{"action": "observe", "target": "payment_gateway"}, {"action": "restart", "target": "payment_gateway"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\medium_m1.json =====
+
+{
+  "scenario_id": "medium_m1",
+  "difficulty": "medium",
+  "step_budget": 10,
+  "description": "product_service received a bad deployment. api_gateway shows a red herring memory warning.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.40, "observable": true, "visible_symptoms": ["high_latency", "memory_usage_warning"]},
+    "auth_service": {"status": "healthy", "health": 0.94, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "unknown", "health": 0.20, "observable": false, "visible_symptoms": []},
+    "order_service": {"status": "healthy", "health": 0.88, "observable": true, "visible_symptoms": []},
+    "postgres_primary": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.92, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.98, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "product_service", "type": "version_mismatch_blocking_call", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "product_service",
+    "root_cause_type": "version_mismatch_blocking_call",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "api_gateway"}, {"action": "drain_connections", "target": "api_gateway"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\medium_m2.json =====
+
+{
+  "scenario_id": "medium_m2",
+  "difficulty": "medium",
+  "step_budget": 10,
+  "description": "redis_cache is full, causing order_service to bypass it and hammer postgres_primary.",
+  "initial_node_states": {
+    "api_gateway": {"status": "degraded", "health": 0.48, "observable": true, "visible_symptoms": ["high_error_rate"]},
+    "auth_service": {"status": "healthy", "health": 0.93, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "healthy", "health": 0.87, "observable": true, "visible_symptoms": []},
+    "order_service": {"status": "critical", "health": 0.12, "observable": true, "visible_symptoms": ["database_connection_timeout", "cache_bypass_mode_active"]},
+    "postgres_primary": {"status": "critical", "health": 0.08, "observable": true, "visible_symptoms": ["connection_pool_exhausted"]},
+    "redis_cache": {"status": "unknown", "health": 0.70, "observable": false, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "redis_cache", "type": "cache_full_eviction_disabled", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "redis_cache",
+    "root_cause_type": "cache_full_eviction_disabled",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "drain_connections", "target": "postgres_primary"}, {"action": "restart", "target": "postgres_primary"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\scenarios\medium_m3.json =====
+
+{
+  "scenario_id": "medium_m3",
+  "difficulty": "medium",
+  "step_budget": 11,
+  "description": "auth_service TLS certificate expired. Process is healthy but requests time out.",
+  "initial_node_states": {
+    "api_gateway": {"status": "critical", "health": 0.15, "observable": true, "visible_symptoms": ["thread_pool_exhausted"]},
+    "auth_service": {"status": "healthy", "health": 0.90, "observable": true, "visible_symptoms": []},
+    "user_db": {"status": "healthy", "health": 0.95, "observable": true, "visible_symptoms": []},
+    "product_service": {"status": "degraded", "health": 0.40, "observable": true, "visible_symptoms": ["authentication_failures"]},
+    "order_service": {"status": "degraded", "health": 0.38, "observable": true, "visible_symptoms": ["authentication_failures"]},
+    "postgres_primary": {"status": "healthy", "health": 0.91, "observable": true, "visible_symptoms": []},
+    "redis_cache": {"status": "healthy", "health": 0.94, "observable": true, "visible_symptoms": []},
+    "payment_gateway": {"status": "healthy", "health": 0.97, "observable": true, "visible_symptoms": []},
+    "cdn_cache": {"status": "healthy", "health": 1.0, "observable": true, "visible_symptoms": []}
+  },
+  "failure_injections": [
+    {"node": "auth_service", "type": "tls_certificate_expired", "log_entry_on_observe": "ERROR TLS handshake failed: certificate expired.", "degradation_delay_steps": 0}
+  ],
+  "ground_truth": {
+    "root_cause_node": "auth_service",
+    "root_cause_type": "tls_certificate_expired",
+    "optimal_steps": 4,
+    "trap_actions": [{"action": "restart", "target": "auth_service"}, {"action": "restart", "target": "api_gateway"}]
+  }
+}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\server\cascade_debug_env_environment.py =====
+
+# server/cascade_debug_env_environment.py
+import json
+from typing import Dict, List, Optional
+from .cascade_engine import propagate_failures
+from .grader import CascadeGrader
+
+class SystemState:
+    """Internal tracker for the true state of the simulated microservices."""
+    def __init__(self, scenario: dict):
+        self.scenario_id = scenario["scenario_id"]
+        self.step = 0
+        self.steps_remaining = scenario["step_budget"]
+        self.intervention_log = []
+        self.done = False
+        
+        # Load initial nodes from the JSON scenario
+        self.nodes = {}
+        for node_id, data in scenario["initial_node_states"].items():
+            self.nodes[node_id] = {
+                "status": data["status"],
+                "health": data["health"],
+                "observable": data["observable"],
+                "visible_symptoms": data.get("visible_symptoms", []),
+                "is_isolated": False
+            }
+            
+    @property
+    def system_health(self) -> float:
+        healths = [n["health"] for n in self.nodes.values() if isinstance(n["health"], (int, float))]
+        if not healths: return 0.0
+        return round(sum(healths) / len(healths), 3)
+
+
+class CascadeDebugEnvironment:
+    """The main interface for the OpenEnv server to interact with."""
+    def __init__(self, scenario_dict: dict):
+        self.scenario_dict = scenario_dict
+        self.state = SystemState(scenario_dict)
+        self.grader = CascadeGrader(scenario_dict["scenario_id"], scenario_dict["ground_truth"])
+        self.initial_health = self.state.system_health
+        
+        # Load pending failures from the scenario (e.g., slow memory leaks)
+        self.pending_cascades = [
+            {
+                "node_id": f["node"],
+                "failure_type": f["type"],
+                "steps_until_propagation": f.get("degradation_delay_steps", 0)
+            }
+            for f in scenario_dict.get("failure_injections", [])
+        ]
+        self.last_action = {}
+
+    def step(self, action: str, target: str, failure_type: str = None) -> dict:
+        """Executes a single step in the environment."""
+        if self.state.done:
+            return {"error": "Episode already finished."}
+
+        # --- Intercept for Hard H3 Decoy Wall ---
+        if self.state.scenario_id == "hard_h3" and target == "payment_gateway":
+            msg = "payment_gateway is an external service managed by a third-party. Circuit breaker has been active for 72 hours. This is expected baseline behavior. No available actions affect this service."
+            self.state.step += 1
+            self.state.steps_remaining -= 1
+            self.state.intervention_log.append({"action": action, "target": target, "result": msg})
+            
+            if self.state.steps_remaining <= 0:
+                self.state.done = True
+                
+            return {"observation": self.get_observation(), "message": msg, "done": self.state.done}
+
+        # --- Process Normal Action ---
+        self.state.step += 1
+        self.state.steps_remaining -= 1
+        self.last_action = {"action": action, "target": target}
+        
+        log_entry = {"action": action, "target": target}
+        if failure_type: 
+            log_entry["failure_type"] = failure_type
+
+        # Action Logic
+        if action == "observe":
+            if target in self.state.nodes:
+                self.state.nodes[target]["observable"] = True
+                # Medium M3 Specific Log Reveal trap
+                if self.state.scenario_id == "medium_m3" and target == "auth_service":
+                    injections = self.scenario_dict.get("failure_injections", [])
+                    if injections and "log_entry_on_observe" in injections[0]:
+                        log_entry["log_revealed"] = injections[0]["log_entry_on_observe"]
+                        
+        elif action == "isolate":
+            if target in self.state.nodes:
+                self.state.nodes[target]["is_isolated"] = True
+                
+        elif action == "declare_root_cause":
+            self.state.done = True
+            log_entry["failure_type"] = failure_type
+
+        self.state.intervention_log.append(log_entry)
+
+        # Check step budget
+        if self.state.steps_remaining <= 0 and not self.state.done:
+            self.state.done = True
+
+        # Run cascade engine to worsen the system if the agent didn't fix it
+        if not self.state.done:
+            self.pending_cascades = propagate_failures(self.state, self.pending_cascades, self.last_action)
+
+        return {"observation": self.get_observation(), "done": self.state.done}
+
+    def get_observation(self) -> dict:
+        """Constructs the partial view of the system that the agent is allowed to see."""
+        nodes_view = {}
+        for node_id, node_data in self.state.nodes.items():
+            nodes_view[node_id] = {
+                "status": node_data["status"],
+                "health": node_data["health"] if node_data["observable"] else "hidden",
+                "visible_symptoms": node_data["visible_symptoms"],
+                "is_isolated": node_data["is_isolated"]
+            }
+            
+        # Compile active alerts based on health thresholds
+        alerts = []
+        for node_id, n_data in self.state.nodes.items():
+            for symptom in n_data["visible_symptoms"]:
+                h = n_data["health"]
+                severity = "medium"
+                if isinstance(h, (int, float)):
+                    if h < 0.2: severity = "critical"
+                    elif h < 0.5: severity = "high"
+                alerts.append({"node": node_id, "type": symptom, "severity": severity})
+                
+        alerts = sorted(alerts, key=lambda x: ["critical","high","medium"].index(x["severity"]))
+
+        return {
+            "step": self.state.step,
+            "steps_remaining": self.state.steps_remaining,
+            "system_health": self.state.system_health,
+            "nodes": nodes_view,
+            "active_alerts": alerts,
+            "intervention_log": self.state.intervention_log,
+            "cascade_risk": "high" if self.state.system_health < 0.4 else "medium" if self.state.system_health < 0.7 else "low"
+        }
+
+    def get_score(self) -> dict:
+        """Calls the grader to evaluate the entire episode."""
+        return self.grader.score(
+            episode_trace=self.state.intervention_log,
+            final_system_health=self.state.system_health,
+            initial_system_health=self.initial_health
+        )
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\server\cascade_engine.py =====
+
+# server/cascade_engine.py
+from typing import List, Dict
+
+# The static architecture of our simulated microservice environment
+DEPENDENCY_GRAPH = {
+    "api_gateway":      ["auth_service", "product_service", "order_service", "cdn_cache"],
+    "auth_service":     ["user_db"],
+    "product_service":  ["postgres_primary"],
+    "order_service":    ["postgres_primary", "redis_cache"],
+    "postgres_primary": ["postgres_replica"],
+    "redis_cache":      ["redis_replica"],
+    "user_db":          [], 
+    "postgres_replica": [], 
+    "redis_replica":    [], 
+    "cdn_cache":        [], 
+    "payment_gateway":  []
+}
+
+# How much a parent's health drops when a child fails
+DEPENDENCY_WEIGHTS = {
+    ("api_gateway", "auth_service"): 0.6,
+    ("api_gateway", "product_service"): 0.4,
+    ("api_gateway", "order_service"): 0.4,
+    ("order_service", "postgres_primary"): 0.7,
+    ("order_service", "redis_cache"): 0.4,
+    ("product_service", "postgres_primary"): 0.6,
+    ("auth_service", "user_db"): 0.8,
+}
+
+def propagate_failures(state, pending_cascades: list, last_action: dict) -> list:
+    """Runs every step to spread degradation based on active failures."""
+    
+    # --- 1. Hardcoded Scenario Dynamics (The Traps) ---
+    
+    # M1 False Recovery Trap (API Gateway restart gives a 1-step fake boost)
+    if state.scenario_id == "medium_m1" and last_action.get("action") == "restart" and last_action.get("target") == "api_gateway":
+        if not getattr(state, "m1_trap_active", False):
+            state.nodes["api_gateway"]["health"] = 0.65
+            state.m1_trap_active = True
+        else:
+            state.nodes["api_gateway"]["health"] = 0.40 # Reverts back to degraded
+            
+    # H2 Amplification Loop (System actively worsens every step if not rolled back)
+    if state.scenario_id == "hard_h2":
+        # Check if the root cause (postgres_primary) has been rolled back
+        fixed = any(log.get("action") == "rollback" and log.get("target") == "postgres_primary" for log in state.intervention_log)
+        if not fixed:
+            if "postgres_primary" in state.nodes:
+                current_health = state.nodes["postgres_primary"]["health"]
+                if isinstance(current_health, (int, float)):
+                    state.nodes["postgres_primary"]["health"] = max(0.0, current_health - 0.10)
+            
+            # Trap: Scaling the order service makes the postgres loop worse
+            if last_action.get("action") == "scale_replica" and last_action.get("target") == "order_service":
+                if "postgres_primary" in state.nodes and isinstance(state.nodes["postgres_primary"]["health"], (int, float)):
+                    state.nodes["postgres_primary"]["health"] = max(0.0, state.nodes["postgres_primary"]["health"] - 0.10)
+
+    # --- 2. Standard Cascade Propagation ---
+    still_pending = []
+    for cascade in pending_cascades:
+        cascade["steps_until_propagation"] -= 1
+        if cascade["steps_until_propagation"] <= 0:
+            failed_node = cascade["node_id"]
+            if failed_node not in state.nodes:
+                continue
+                
+            failed_health = state.nodes[failed_node]["health"]
+            if not isinstance(failed_health, (int, float)):
+                failed_health = 0.0 # Fallback if hidden
+            
+            # Degrade parents
+            for parent_id, children in DEPENDENCY_GRAPH.items():
+                if failed_node in children and parent_id in state.nodes:
+                    weight = DEPENDENCY_WEIGHTS.get((parent_id, failed_node), 0.3)
+                    parent = state.nodes[parent_id]
+                    
+                    if isinstance(parent["health"], (int, float)):
+                        degradation = (1.0 - failed_health) * weight
+                        parent["health"] = round(max(0.0, parent["health"] - degradation), 3)
+                        
+                        # Update visual status
+                        if parent["health"] < 0.2:
+                            parent["status"] = "critical"
+                        elif parent["health"] < 0.5:
+                            parent["status"] = "degraded"
+        else:
+            still_pending.append(cascade)
+    
+    return still_pending
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\server\grader.py =====
+
+# server/grader.py
+from typing import List, Dict
+
+class CascadeGrader:
+    def __init__(self, scenario_id: str, ground_truth: dict):
+        self.ground_truth = ground_truth
+        self.scenario_id = scenario_id
+    
+    def score(self, episode_trace: List[dict], final_system_health: float, initial_system_health: float) -> dict:
+        d1 = self._root_cause_accuracy(episode_trace)
+        d2 = self._intervention_order_score(episode_trace)
+        d3 = self._cascade_damage_score(final_system_health, initial_system_health)
+        d4 = self._step_efficiency(episode_trace)
+        
+        # Weighted Final Score
+        total = (0.35 * d1) + (0.30 * d2) + (0.25 * d3) + (0.10 * d4)
+        
+        return {
+            "scenario_id": self.scenario_id,
+            "root_cause_accuracy": round(d1, 3),
+            "intervention_order":  round(d2, 3),
+            "cascade_damage":      round(d3, 3),
+            "step_efficiency":     round(d4, 3),
+            "total":               round(total, 3),
+            "breakdown": {
+                "correct_root_cause": self._get_declared_root_cause(episode_trace),
+                "ground_truth_root_cause": self.ground_truth.get("root_cause_node")
+            }
+        }
+    
+    def _root_cause_accuracy(self, trace: List[dict]) -> float:
+        declarations = [a for a in trace if a.get("action") == "declare_root_cause"]
+        if not declarations: 
+            return 0.0
+        
+        score = 0.0
+        # Check primary root cause
+        primary_node = self.ground_truth.get("root_cause_node")
+        primary_type = self.ground_truth.get("root_cause_type")
+        
+        for dec in declarations:
+            if dec.get("target") == primary_node:
+                score += 0.5 if dec.get("failure_type") != primary_type else 1.0
+        
+        # Check secondary root cause (e.g., for Hard H1 Scenario)
+        sec = self.ground_truth.get("secondary_root_cause")
+        if sec:
+            score = score / 2.0  # Max 0.5 for primary if a secondary exists
+            for dec in declarations:
+                if dec.get("target") == sec.get("node"):
+                    score += 0.25 if dec.get("failure_type") != sec.get("type") else 0.5
+                    
+        return min(1.0, score)
+    
+    def _intervention_order_score(self, trace: List[dict]) -> float:
+        score = 1.0
+        observed_nodes = set()
+        IRREVERSIBLE = {"isolate", "restart", "rollback"}
+        INTERVENTION = {"isolate", "restart", "rollback", "drain_connections", "reroute_traffic", "scale_replica"}
+        
+        for action in trace:
+            action_type = action.get("action")
+            target = action.get("target")
+            
+            if action_type == "observe": 
+                observed_nodes.add(target)
+            elif action_type in INTERVENTION:
+                # Penalize acting without observing first
+                if target not in observed_nodes: 
+                    score -= 0.15 
+                # Penalize irreversible actions on the wrong node
+                if action_type in IRREVERSIBLE and target != self.ground_truth.get("root_cause_node"):
+                    score -= 0.25 
+            
+            # Penalize falling for specific traps defined in the JSON
+            trap_nodes = [t.get("node") for t in self.ground_truth.get("trap_actions_nodes", []) if isinstance(t, dict)]
+            trap_strings = [t.get("action") + ":" + t.get("target", "") for t in self.ground_truth.get("trap_actions", []) if isinstance(t, dict)]
+            
+            if target in trap_nodes or f"{action_type}:{target}" in trap_strings:
+                score -= 0.10
+                
+        return max(0.0, score)
+    
+    def _cascade_damage_score(self, final_health: float, initial_health: float) -> float:
+        if initial_health == 0: 
+            return 0.0
+        return min(1.0, max(0.0, final_health / initial_health))
+    
+    def _step_efficiency(self, trace: List[dict]) -> float:
+        optimal = self.ground_truth.get("optimal_steps", 5)
+        actual = len(trace)
+        if actual == 0: 
+            return 0.0
+        return min(1.0, optimal / actual)
+    
+    def _get_declared_root_cause(self, trace: List[dict]):
+        for action in trace:
+            if action.get("action") == "declare_root_cause":
+                return {"node": action.get("target"), "failure_type": action.get("failure_type")}
+        return None
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\server\__init__.py =====
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Cascade Debug Env environment server components."""
+
+from .cascade_debug_env_environment import CascadeDebugEnvironment
+
+__all__ = ["CascadeDebugEnvironment"]
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\app.py =====
+
+# # # # Copyright (c) Meta Platforms, Inc. and affiliates.
+# # # # All rights reserved.
+# # # #
+# # # # This source code is licensed under the BSD-style license found in the
+# # # # LICENSE file in the root directory of this source tree.
+
+# # # """
+# # # FastAPI application for the Cascade Debug Env Environment.
+
+# # # This module creates an HTTP server that exposes the CascadeDebugEnvironment
+# # # over HTTP and WebSocket endpoints, compatible with EnvClient.
+
+# # # Endpoints:
+# # #     - POST /reset: Reset the environment
+# # #     - POST /step: Execute an action
+# # #     - GET /state: Get current environment state
+# # #     - GET /schema: Get action/observation schemas
+# # #     - WS /ws: WebSocket endpoint for persistent sessions
+
+# # # Usage:
+# # #     # Development (with auto-reload):
+# # #     uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
+
+# # #     # Production:
+# # #     uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 4
+
+# # #     # Or run directly:
+# # #     python -m server.app
+# # # """
+
+# # # try:
+# # #     from openenv.core.env_server.http_server import create_app
+# # # except Exception as e:  # pragma: no cover
+# # #     raise ImportError(
+# # #         "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
+# # #     ) from e
+
+# # # try:
+# # #     from ..models import CascadeDebugAction, CascadeDebugObservation
+# # #     from .cascade_debug_env_environment import CascadeDebugEnvironment
+# # # except ModuleNotFoundError:
+# # #     from models import CascadeDebugAction, CascadeDebugObservation
+# # #     from server.cascade_debug_env_environment import CascadeDebugEnvironment
+
+
+# # # # Create the app with web interface and README integration
+# # # app = create_app(
+# # #     CascadeDebugEnvironment,
+# # #     CascadeDebugAction,
+# # #     CascadeDebugObservation,
+# # #     env_name="cascade_debug_env",
+# # #     max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
+# # # )
+
+
+# # # def main(host: str = "0.0.0.0", port: int = 8000):
+# # #     """
+# # #     Entry point for direct execution via uv run or python -m.
+
+# # #     This function enables running the server without Docker:
+# # #         uv run --project . server
+# # #         uv run --project . server --port 8001
+# # #         python -m cascade_debug_env.server.app
+
+# # #     Args:
+# # #         host: Host address to bind to (default: "0.0.0.0")
+# # #         port: Port number to listen on (default: 8000)
+
+# # #     For production deployments, consider using uvicorn directly with
+# # #     multiple workers:
+# # #         uvicorn cascade_debug_env.server.app:app --workers 4
+# # #     """
+# # #     import uvicorn
+
+# # #     uvicorn.run(app, host=host, port=port)
+
+
+# # # if __name__ == "__main__":
+# # #     import argparse
+
+# # #     parser = argparse.ArgumentParser()
+# # #     parser.add_argument("--port", type=int, default=8000)
+# # #     args = parser.parse_args()
+# # #     main(port=args.port)
+# # # server/app.py
+# # from fastapi import FastAPI, HTTPException
+# # from pydantic import BaseModel
+# # from typing import Optional
+# # import json
+# # import os
+
+# # from cascade_debug_env_environment import CascadeDebugEnvironment
+
+# # app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
+
+# # # Load all 9 scenarios from the parent directory's 'scenarios' folder
+# # SCENARIOS = {}
+# # BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# # SCENARIO_DIR = os.path.join(BASE_DIR, "scenarios")
+
+# # try:
+# #     for fname in os.listdir(SCENARIO_DIR):
+# #         if fname.endswith(".json"):
+# #             with open(os.path.join(SCENARIO_DIR, fname)) as f:
+# #                 s = json.load(f)
+# #                 SCENARIOS[s["scenario_id"]] = s
+# # except FileNotFoundError:
+# #     print(f"Warning: Could not find scenarios directory at {SCENARIO_DIR}")
+
+# # active_env = None
+
+# # # We redefine the request model here to keep the server self-contained
+# # class StepRequest(BaseModel):
+# #     action: str
+# #     target: str
+# #     failure_type: Optional[str] = None
+
+# # @app.get("/")
+# # def health_check():
+# #     return {"status": "ok", "loaded_scenarios": list(SCENARIOS.keys())}
+
+# # @app.post("/reset")
+# # def reset(scenario_id: str):
+# #     global active_env
+# #     if scenario_id not in SCENARIOS:
+# #         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
+    
+# #     active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
+# #     return active_env.get_observation()
+
+# # @app.post("/step")
+# # def step(req: StepRequest):
+# #     global active_env
+# #     if not active_env:
+# #         raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+    
+# #     result = active_env.step(req.action, req.target, req.failure_type)
+# #     return result
+
+# # @app.get("/grader")
+# # def get_score():
+# #     global active_env
+# #     if not active_env:
+# #         raise HTTPException(status_code=400, detail="No active episode.")
+# #     if not active_env.state.done:
+# #         raise HTTPException(status_code=400, detail="Episode not complete. Must declare root cause or run out of steps.")
+    
+# #     return active_env.get_score()
+# # from fastapi import FastAPI, HTTPException
+# # from typing import Optional, Dict, Any
+# # import json
+# # import os
+# # import sys
+
+# # # Add the parent directory to sys.path so we can import models and client
+# # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# # from models import Action, StepResponse, Observation
+# # from cascade_debug_env_environment import CascadeDebugEnvironment
+
+# # app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
+
+# # SCENARIOS = {}
+# # BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# # SCENARIO_DIR = os.path.join(BASE_DIR, "scenarios")
+
+# # for fname in os.listdir(SCENARIO_DIR):
+# #     if fname.endswith(".json"):
+# #         with open(os.path.join(SCENARIO_DIR, fname)) as f:
+# #             s = json.load(f)
+# #             SCENARIOS[s["scenario_id"]] = s
+
+# # active_env = None
+
+# # @app.get("/")
+# # def health_check():
+# #     return {"status": "ok"}
+
+# # # REQUIRED ENDPOINT 1: /tasks
+# # @app.get("/tasks")
+# # def get_tasks():
+# #     return {
+# #         "tasks": list(SCENARIOS.keys()),
+# #         "action_schema": Action.model_json_schema() # Required by checklist
+# #     }
+
+# # # REQUIRED ENDPOINT 2: /reset
+# # @app.post("/reset", response_model=Observation)
+# # def reset(scenario_id: str):
+# #     global active_env
+# #     if scenario_id not in SCENARIOS:
+# #         raise HTTPException(status_code=404, detail="Scenario not found.")
+# #     active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
+# #     return active_env.get_observation()
+
+# # # REQUIRED ENDPOINT 3: /state
+# # @app.get("/state", response_model=Observation)
+# # def get_state():
+# #     global active_env
+# #     if not active_env:
+# #         raise HTTPException(status_code=400, detail="No active episode.")
+# #     return active_env.get_observation()
+
+# # # REQUIRED ENDPOINT 4: /step (Must return obs, reward, done, info)
+# # @app.post("/step", response_model=StepResponse)
+# # def step(req: Action):
+# #     global active_env
+# #     if not active_env:
+# #         raise HTTPException(status_code=400, detail="Call /reset first.")
+    
+# #     result = active_env.step(req.action, req.target, req.failure_type)
+    
+# #     # Calculate intermediate reward (partial progress)
+# #     current_score = active_env.get_score()["total"] if active_env.state.done else 0.0
+    
+# #     return {
+# #         "observation": result.get("observation"),
+# #         "reward": current_score, # Fulfills the reward requirement
+# #         "done": result.get("done", False),
+# #         "info": {"message": result.get("message", "")} # Fulfills the info requirement
+# #     }
+
+# # # REQUIRED ENDPOINT 5: /grader
+# # @app.get("/grader")
+# # def get_score():
+# #     global active_env
+# #     if not active_env:
+# #         raise HTTPException(status_code=400, detail="No active episode.")
+# #     return active_env.get_score()
+
+# # # REQUIRED ENDPOINT 6: /baseline
+# # @app.get("/baseline")
+# # def run_baseline():
+# #     """Triggers the inference script and returns baseline scores."""
+# #     from client import run_systematic_baseline # Import our baseline agent
+    
+# #     scores = {}
+# #     # Test one from each difficulty to prove it works
+# #     test_tasks = ["easy_e1", "medium_m2", "hard_h2"] 
+    
+# #     for task in test_tasks:
+# #         try:
+# #             score = run_systematic_baseline(task, external_call=True)
+# #             scores[task] = score
+# #         except Exception as e:
+# #             scores[task] = f"Error: {str(e)}"
+            
+# #     return {"baseline_scores": scores}
+# # server/app.py
+# from fastapi import FastAPI, HTTPException
+# from typing import Optional, Dict, Any
+# import json
+# import os
+# import sys
+
+# # Add the parent directory to sys.path so we can import models and client
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# from models import Action, StepResponse, Observation
+# from server.cascade_debug_env_environment import CascadeDebugEnvironment
+
+# app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
+
+# SCENARIOS = {}
+# BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# SCENARIO_DIR = os.path.join(BASE_DIR, "scenarios")
+
+# # Load scenarios on startup
+# try:
+#     for fname in os.listdir(SCENARIO_DIR):
+#         if fname.endswith(".json"):
+#             with open(os.path.join(SCENARIO_DIR, fname)) as f:
+#                 s = json.load(f)
+#                 SCENARIOS[s["scenario_id"]] = s
+# except FileNotFoundError:
+#     print(f"Warning: Could not find scenarios directory at {SCENARIO_DIR}")
+
+# active_env = None
+
+# @app.get("/")
+# def health_check():
+#     return {"status": "ok", "loaded_scenarios": list(SCENARIOS.keys())}
+
+# # REQUIRED ENDPOINT 1: /tasks
+# @app.get("/tasks")
+# def get_tasks():
+#     """Returns the list of available tasks and the JSON schema for Actions."""
+#     return {
+#         "tasks": list(SCENARIOS.keys()),
+#         "action_schema": Action.model_json_schema()
+#     }
+
+# # REQUIRED ENDPOINT 2: /reset
+# @app.post("/reset", response_model=Observation)
+# def reset(scenario_id: str):
+#     """Initializes the environment and returns the first observation."""
+#     global active_env
+#     if scenario_id not in SCENARIOS:
+#         raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found.")
+    
+#     active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
+#     return active_env.get_observation()
+
+# # REQUIRED ENDPOINT 3: /state
+# @app.get("/state", response_model=Observation)
+# def get_state():
+#     """Returns the current state of the environment."""
+#     global active_env
+#     if not active_env:
+#         raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+#     return active_env.get_observation()
+
+# # REQUIRED ENDPOINT 4: /step
+# @app.post("/step", response_model=StepResponse)
+# def step(req: Action):
+#     """Takes an action and returns observation, reward, done, and info."""
+#     global active_env
+#     if not active_env:
+#         raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+    
+#     result = active_env.step(req.action, req.target, req.failure_type)
+    
+#     # Calculate intermediate reward (partial progress)
+#     # OpenEnv requires a float reward signal.
+#     current_score = active_env.get_score()["total"] if active_env.state.done else 0.0
+    
+#     return {
+#         "observation": result.get("observation"),
+#         "reward": current_score,
+#         "done": result.get("done", False),
+#         "info": {"message": result.get("message", "")}
+#     }
+
+# # REQUIRED ENDPOINT 5: /grader
+# @app.get("/grader")
+# def get_score():
+#     """Returns the final score breakdown after an episode finishes."""
+#     global active_env
+#     if not active_env:
+#         raise HTTPException(status_code=400, detail="No active episode.")
+#     if not active_env.state.done:
+#         raise HTTPException(status_code=400, detail="Episode not complete. Must declare root cause or run out of steps.")
+    
+#     return active_env.get_score()
+
+# # REQUIRED ENDPOINT 6: /baseline
+# @app.get("/baseline")
+# def run_baseline():
+#     """Triggers the inference script and returns baseline scores for validation."""
+#     # We import the Groq-powered LLM agent from client.py
+#     from client import run_smart_agent 
+    
+#     scores = {}
+#     # Test one from each difficulty to prove it works to the validators
+#     test_tasks = ["easy_e1", "medium_m2", "hard_h2"] 
+    
+#     for task in test_tasks:
+#         try:
+#             # external_call=True mutes the terminal prints so it doesn't clutter the server logs
+#             score = run_smart_agent(task, external_call=True) 
+#             scores[task] = score
+#         except Exception as e:
+#             scores[task] = f"Error: {str(e)}"
+            
+#     return {"baseline_scores": scores}
+
+from fastapi import FastAPI, HTTPException
+import json
+import os
+import sys
+
+# Add the parent directory to sys.path so imports work when running from server/
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models import Action, StepResponse, Observation
+from server.cascade_debug_env_environment import CascadeDebugEnvironment
+
+
+app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SCENARIO_DIR = os.path.join(BASE_DIR, "scenarios")
+
+print("BASE_DIR:", BASE_DIR)
+print("SCENARIO_DIR:", SCENARIO_DIR)
+print("SCENARIO_DIR exists:", os.path.exists(SCENARIO_DIR))
+if os.path.exists(SCENARIO_DIR):
+    print("Scenario files:", os.listdir(SCENARIO_DIR))
+
+SCENARIOS = {}
+active_env = None
+
+
+def load_scenarios() -> dict:
+    scenarios = {}
+
+    if not os.path.exists(SCENARIO_DIR):
+        raise FileNotFoundError(f"Scenarios directory not found at: {SCENARIO_DIR}")
+
+    for fname in os.listdir(SCENARIO_DIR):
+        if fname.endswith(".json"):
+            fpath = os.path.join(SCENARIO_DIR, fname)
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            scenario_id = data.get("scenario_id")
+            if not scenario_id:
+                raise ValueError(f"Missing 'scenario_id' in scenario file: {fname}")
+
+            scenarios[scenario_id] = data
+
+    if not scenarios:
+        raise ValueError(f"No scenario JSON files found in: {SCENARIO_DIR}")
+
+    return scenarios
+
+
+try:
+    SCENARIOS = load_scenarios()
+except Exception as e:
+    print(f"[Startup Error] Failed to load scenarios: {e}")
+
+
+@app.get("/")
+def health_check():
+    return {
+        "status": "ok",
+        "loaded_scenarios": list(SCENARIOS.keys()),
+        "scenario_count": len(SCENARIOS),
+    }
+
+
+@app.get("/tasks")
+def get_tasks():
+    """
+    Returns available tasks and the action schema.
+    """
+    if not SCENARIOS:
+        raise HTTPException(status_code=500, detail="No scenarios loaded.")
+
+    return {
+        "tasks": list(SCENARIOS.keys()),
+        "action_schema": Action.model_json_schema(),
+    }
+
+
+@app.post("/reset", response_model=Observation)
+def reset(scenario_id: str):
+    """
+    Initializes the environment for a given scenario and returns the first observation.
+    """
+    global active_env
+
+    if not SCENARIOS:
+        raise HTTPException(status_code=500, detail="No scenarios loaded.")
+
+    if scenario_id not in SCENARIOS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Scenario '{scenario_id}' not found."
+        )
+
+    try:
+        active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
+        return active_env.get_observation()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to initialize scenario '{scenario_id}': {str(e)}"
+        )
+
+
+@app.get("/state", response_model=Observation)
+def get_state():
+    """
+    Returns the current observation/state of the active environment.
+    """
+    global active_env
+
+    if active_env is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No active episode. Call /reset first."
+        )
+
+    try:
+        return active_env.get_observation()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch environment state: {str(e)}"
+        )
+
+
+@app.post("/step", response_model=StepResponse)
+def step(req: Action):
+    """
+    Executes one action in the environment and returns:
+    observation, reward, done, info
+    """
+    global active_env
+
+    if active_env is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No active episode. Call /reset first."
+        )
+
+    try:
+        result = active_env.step(req.action, req.target, req.failure_type)
+
+        reward = 0.0
+        try:
+            score_data = active_env.get_score()
+            if isinstance(score_data, dict):
+                reward = float(score_data.get("total", 0.0))
+        except Exception:
+            reward = 0.0
+
+        return {
+            "observation": result.get("observation"),
+            "reward": reward,
+            "done": result.get("done", False),
+            "info": {
+                "message": result.get("message", "")
+            },
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Step execution failed: {str(e)}"
+        )
+
+
+@app.get("/grader")
+def get_score():
+    """
+    Returns the final score breakdown after episode completion.
+    """
+    global active_env
+
+    if active_env is None:
+        raise HTTPException(status_code=400, detail="No active episode.")
+
+    try:
+        if not active_env.state.done:
+            raise HTTPException(
+                status_code=400,
+                detail="Episode not complete. Must declare root cause or run out of steps."
+            )
+
+        return active_env.get_score()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute grade: {str(e)}"
+        )
+
+
+@app.get("/baseline")
+def run_baseline():
+    """
+    Runs the baseline agent on one easy, one medium, and one hard task.
+    """
+    try:
+        from client import run_smart_agent
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to import baseline agent from client.py: {str(e)}"
+        )
+
+    test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
+    scores = {}
+
+    for task in test_tasks:
+        try:
+            scores[task] = run_smart_agent(task, external_call=True)
+        except Exception as e:
+            scores[task] = {"error": str(e)}
+
+    return {"baseline_scores": scores}
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\client.py =====
+
+# # # Copyright (c) Meta Platforms, Inc. and affiliates.
+# # # All rights reserved.
+# # #
+# # # This source code is licensed under the BSD-style license found in the
+# # # LICENSE file in the root directory of this source tree.
+
+# # """Cascade Debug Env Environment Client."""
+
+# # from typing import Dict
+
+# # from openenv.core import EnvClient
+# # from openenv.core.client_types import StepResult
+# # from openenv.core.env_server.types import State
+
+# # from .models import CascadeDebugAction, CascadeDebugObservation
+
+
+# # class CascadeDebugEnv(
+# #     EnvClient[CascadeDebugAction, CascadeDebugObservation, State]
+# # ):
+# #     """
+# #     Client for the Cascade Debug Env Environment.
+
+# #     This client maintains a persistent WebSocket connection to the environment server,
+# #     enabling efficient multi-step interactions with lower latency.
+# #     Each client instance has its own dedicated environment session on the server.
+
+# #     Example:
+# #         >>> # Connect to a running server
+# #         >>> with CascadeDebugEnv(base_url="http://localhost:8000") as client:
+# #         ...     result = client.reset()
+# #         ...     print(result.observation.echoed_message)
+# #         ...
+# #         ...     result = client.step(CascadeDebugAction(message="Hello!"))
+# #         ...     print(result.observation.echoed_message)
+
+# #     Example with Docker:
+# #         >>> # Automatically start container and connect
+# #         >>> client = CascadeDebugEnv.from_docker_image("cascade_debug_env-env:latest")
+# #         >>> try:
+# #         ...     result = client.reset()
+# #         ...     result = client.step(CascadeDebugAction(message="Test"))
+# #         ... finally:
+# #         ...     client.close()
+# #     """
+
+# #     def _step_payload(self, action: CascadeDebugAction) -> Dict:
+# #         """
+# #         Convert CascadeDebugAction to JSON payload for step message.
+
+# #         Args:
+# #             action: CascadeDebugAction instance
+
+# #         Returns:
+# #             Dictionary representation suitable for JSON encoding
+# #         """
+# #         return {
+# #             "message": action.message,
+# #         }
+
+# #     def _parse_result(self, payload: Dict) -> StepResult[CascadeDebugObservation]:
+# #         """
+# #         Parse server response into StepResult[CascadeDebugObservation].
+
+# #         Args:
+# #             payload: JSON response data from server
+
+# #         Returns:
+# #             StepResult with CascadeDebugObservation
+# #         """
+# #         obs_data = payload.get("observation", {})
+# #         observation = CascadeDebugObservation(
+# #             echoed_message=obs_data.get("echoed_message", ""),
+# #             message_length=obs_data.get("message_length", 0),
+# #             done=payload.get("done", False),
+# #             reward=payload.get("reward"),
+# #             metadata=obs_data.get("metadata", {}),
+# #         )
+
+# #         return StepResult(
+# #             observation=observation,
+# #             reward=payload.get("reward"),
+# #             done=payload.get("done", False),
+# #         )
+
+# #     def _parse_state(self, payload: Dict) -> State:
+# #         """
+# #         Parse server response into State object.
+
+# #         Args:
+# #             payload: JSON response from state request
+
+# #         Returns:
+# #             State object with episode_id and step_count
+# #         """
+# #         return State(
+# #             episode_id=payload.get("episode_id"),
+# #             step_count=payload.get("step_count", 0),
+# #         )
+# # client.py
+# import requests
+# import time
+
+# SERVER_URL = "http://127.0.0.1:8000"
+
+# def wait_for_server():
+#     """Wait for the FastAPI server to boot up."""
+#     print("Waiting for OpenEnv server...")
+#     for _ in range(10):
+#         try:
+#             res = requests.get(f"{SERVER_URL}/")
+#             if res.status_code == 200:
+#                 print("Server is up!", res.json())
+#                 return True
+#         except requests.ConnectionError:
+#             time.sleep(1)
+#     return False
+
+# def run_systematic_baseline(scenario_id: str):
+#     """
+#     A baseline agent that observes degraded nodes, 
+#     tries to fix them, and declares a root cause.
+#     """
+#     print(f"\n--- Starting Evaluation: {scenario_id} ---")
+    
+#     # 1. Reset Environment
+#     try:
+#         obs = requests.post(f"{SERVER_URL}/reset?scenario_id={scenario_id}").json()
+#     except Exception as e:
+#         print(f"Failed to reset environment: {e}")
+#         return
+
+#     step_count = 0
+#     done = False
+    
+#     while not done:
+#         step_count += 1
+#         print(f"\n[Step {step_count}] Health: {obs.get('system_health')} | Remaining: {obs.get('steps_remaining')}")
+        
+#         # Simple Logic: Find the first node showing symptoms that we haven't observed yet
+#         target_node = None
+#         action_to_take = "observe"
+        
+#         for node_id, data in obs.get("nodes", {}).items():
+#             if data.get("visible_symptoms") and data.get("health") == "hidden":
+#                 target_node = node_id
+#                 action_to_take = "observe"
+#                 break
+#             elif data.get("visible_symptoms") and data.get("health") != "hidden":
+#                 # If we observed it and it has symptoms, try restarting it
+#                 target_node = node_id
+#                 action_to_take = "restart"
+#                 break
+                
+#         # If we didn't find anything obvious, or we are running out of time, guess and end it
+#         if not target_node or obs.get("steps_remaining", 0) <= 2:
+#             target_node = list(obs.get("nodes", {}).keys())[0] # Just pick the first node
+#             action_to_take = "declare_root_cause"
+            
+#         print(f"Agent Action -> {action_to_take.upper()} on {target_node}")
+        
+#         payload = {"action": action_to_take, "target": target_node}
+#         if action_to_take == "declare_root_cause":
+#             payload["failure_type"] = "unknown_crash"
+            
+#         # 2. Take Step
+#         res = requests.post(f"{SERVER_URL}/step", json=payload).json()
+        
+#         if res.get("message"):
+#             print(f"Server Message: {res.get('message')}")
+            
+#         done = res.get("done", False)
+#         if not done:
+#             obs = res.get("observation", {})
+
+#     # 3. Get Final Score
+#     print("\nEpisode Complete. Fetching Score...")
+#     score = requests.get(f"{SERVER_URL}/grader").json()
+#     print(f"FINAL SCORE: {score['total'] * 100}%")
+#     print(f"Breakdown: Accuracy={score['root_cause_accuracy']}, Intervention={score['intervention_order']}, Damage={score['cascade_damage']}")
+
+# if __name__ == "__main__":
+#     if wait_for_server():
+#         # Test it on the first easy scenario
+#         run_systematic_baseline("easy_e1")
+# client.py
+import requests
+import time
+import json
+import os
+from openai import OpenAI
+
+SERVER_URL = "http://127.0.0.1:8000"
+
+# --- 1. GROQ CONFIGURATION ---
+# Replace this with your actual gsk_ key from Groq
+os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+# We tell the OpenAI client to route traffic to Groq instead of OpenAI
+client = OpenAI(
+    api_key=os.environ.get("OPENAI_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
+
+# FIXED: We must use a valid Groq model, not gpt-4o
+GROQ_MODEL = "llama-3.3-70b-versatile"
+
+SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed system.
+You will be given a JSON representation of the system state.
+You must output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
+1. "thought": A brief string explaining your reasoning based on dependencies and symptoms.
+2. "action": An object containing "action_type", "target", and optionally "failure_type".
+
+Available actions: observe, restart, isolate, rollback, drain_connections, reroute_traffic, scale_replica, declare_root_cause.
+
+RULES:
+- You cannot see a node's true health until you 'observe' it. DO THIS FIRST.
+- Do NOT take irreversible actions (isolate, restart, rollback) on a node you haven't observed.
+- DO NOT observe the same node multiple times.
+- Once you observe the suspicious upstream node, you MUST execute a fix (like drain_connections, rollback, or restart).
+- If you find the issue and fix it, the final action must be 'declare_root_cause' with the node and failure_type.
+"""
+
+def wait_for_server():
+    print("Waiting for OpenEnv server...")
+    for _ in range(10):
+        try:
+            if requests.get(f"{SERVER_URL}/").status_code == 200:
+                print("Server is up!")
+                return True
+        except:
+            time.sleep(1)
+    return False
+
+def run_smart_agent(scenario_id: str, external_call: bool = False):
+    """
+    Runs the LLM agent against a scenario. 
+    external_call=True mutes the print statements for the automated evaluator.
+    """
+    if not external_call:
+        print(f"\n========== RUNNING SMART AGENT: {scenario_id} ==========")
+        
+    try:
+        state = requests.post(f"{SERVER_URL}/reset?scenario_id={scenario_id}").json()
+    except Exception as e:
+        if not external_call: print(f"Failed to reset server: {e}")
+        return 0.0
+    
+    # Safety loop limit so it doesn't get stuck forever
+    max_steps = state.get("steps_remaining", 15)
+    
+    for _ in range(max_steps):
+        if not external_call:
+            print(f"\n[Step {state.get('step')}] Health: {state.get('system_health')} | Remaining: {state.get('steps_remaining')}")
+        
+        prompt = f"CURRENT STATE:\n{json.dumps(state, indent=2)}\n\nWhat is your next move?"
+        
+        try:
+            response = client.chat.completions.create(
+                model=GROQ_MODEL,
+                response_format={ "type": "json_object" },
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            decision = json.loads(response.choices[0].message.content)
+            
+            if not external_call:
+                print(f"🤖 THOUGHT: {decision.get('thought')}")
+            
+            action_payload = decision.get("action", {})
+            req_body = {
+                "action": action_payload.get("action_type", "observe"),
+                "target": action_payload.get("target", "api_gateway")
+            }
+            if "failure_type" in action_payload:
+                req_body["failure_type"] = action_payload["failure_type"]
+                
+            if not external_call:
+                print(f"⚡ ACTION: {req_body['action']} -> {req_body['target']}")
+            
+        except Exception as e:
+            if not external_call: print(f"LLM Error: {e}")
+            break
+            
+        # Execute on Server
+        try:
+            res = requests.post(f"{SERVER_URL}/step", json=req_body).json()
+        except Exception as e:
+            if not external_call: print(f"Server execution error: {e}")
+            break
+        
+        if res.get("info", {}).get("message") and not external_call:
+            print(f"SERVER MSG: {res.get('info')['message']}")
+            
+        if res.get("done"):
+            break
+            
+        state = res.get("observation")
+
+    # Get Final Score Safely
+    final_score = 0.0
+    try:
+        score_data = requests.get(f"{SERVER_URL}/grader").json()
+        
+        # Check if the server actually returned a score, or an error (like 'Episode not complete')
+        if "total" in score_data:
+            final_score = score_data['total']
+            
+            if not external_call:
+                print("\n========== EPISODE COMPLETE ==========")
+                print(f"FINAL SCORE: {final_score * 100}%")
+                print(json.dumps(score_data.get('breakdown', {}), indent=2))
+        else:
+            if not external_call:
+                print("\n========== EPISODE ENDED EARLY ==========")
+                print(f"Server returned: {score_data}")
+                
+    except Exception as e:
+        if not external_call: print(f"Failed to fetch final score: {e}")
+        
+    return final_score
+
+if __name__ == "__main__":
+    if wait_for_server():
+        # Test it locally to watch the magic happen
+        run_smart_agent("medium_m2")
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\Dockerfile =====
+
+# # Copyright (c) Meta Platforms, Inc. and affiliates.
+# # All rights reserved.
+# #
+# # This source code is licensed under the BSD-style license found in the
+# # LICENSE file in the root directory of this source tree.
+
+# # Multi-stage build using openenv-base
+# # This Dockerfile is flexible and works for both:
+# # - In-repo environments (with local OpenEnv sources)
+# # - Standalone environments (with openenv from PyPI/Git)
+# # The build script (openenv build) handles context detection and sets appropriate build args.
+
+# ARG BASE_IMAGE=ghcr.io/meta-pytorch/openenv-base:latest
+# FROM ${BASE_IMAGE} AS builder
+
+# WORKDIR /app
+
+# # Ensure git is available (required for installing dependencies from VCS)
+# RUN apt-get update && \
+#     apt-get install -y --no-install-recommends git && \
+#     rm -rf /var/lib/apt/lists/*
+
+# # Build argument to control whether we're building standalone or in-repo
+# ARG BUILD_MODE=in-repo
+# ARG ENV_NAME=cascade_debug_env
+
+# # Copy environment code (always at root of build context)
+# COPY . /app/env
+
+# # For in-repo builds, openenv is already vendored in the build context
+# # For standalone builds, openenv will be installed via pyproject.toml
+# WORKDIR /app/env
+
+# # Ensure uv is available (for local builds where base image lacks it)
+# RUN if ! command -v uv >/dev/null 2>&1; then \
+#         curl -LsSf https://astral.sh/uv/install.sh | sh && \
+#         mv /root/.local/bin/uv /usr/local/bin/uv && \
+#         mv /root/.local/bin/uvx /usr/local/bin/uvx; \
+#     fi
+    
+# # Install dependencies using uv sync
+# # If uv.lock exists, use it; otherwise resolve on the fly
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     if [ -f uv.lock ]; then \
+#         uv sync --frozen --no-install-project --no-editable; \
+#     else \
+#         uv sync --no-install-project --no-editable; \
+#     fi
+
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     if [ -f uv.lock ]; then \
+#         uv sync --frozen --no-editable; \
+#     else \
+#         uv sync --no-editable; \
+#     fi
+
+# # Final runtime stage
+# FROM ${BASE_IMAGE}
+
+# WORKDIR /app
+
+# # Copy the virtual environment from builder
+# COPY --from=builder /app/env/.venv /app/.venv
+
+# # Copy the environment code
+# COPY --from=builder /app/env /app/env
+
+# # Set PATH to use the virtual environment
+# ENV PATH="/app/.venv/bin:$PATH"
+
+# # Set PYTHONPATH so imports work correctly
+# ENV PYTHONPATH="/app/env:$PYTHONPATH"
+
+# # Health check
+# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+#     CMD curl -f http://localhost:8000/health || exit 1
+
+# # Run the FastAPI server
+# # The module path is constructed to work with the /app/env structure
+# CMD ["sh", "-c", "cd /app/env && uvicorn server.app:app --host 0.0.0.0 --port 8000"]
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r /app/requirements.txt
+
+COPY . /app
+
+EXPOSE 7860
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\inference.py =====
+
+import requests
+import time
+import json
+import os
+from openai import OpenAI
+
+# -----------------------------
+# Environment Configuration
+# -----------------------------
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Optional override if you want to explicitly set provider endpoint
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
+
+if not OPENAI_API_KEY:
+    raise ValueError("Missing OPENAI_API_KEY environment variable.")
+
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+    base_url=OPENAI_BASE_URL
+)
+
+SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed system.
+You will be given a JSON representation of the system state.
+You must output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
+1. "thought": A brief string explaining your reasoning based on dependencies and symptoms.
+2. "action": An object containing "action_type", "target", and optionally "failure_type".
+
+Available actions: observe, restart, isolate, rollback, drain_connections, reroute_traffic, scale_replica, declare_root_cause.
+
+RULES:
+- You cannot see a node's true health until you 'observe' it. DO THIS FIRST.
+- Do NOT take irreversible actions (isolate, restart, rollback) on a node you haven't observed.
+- DO NOT observe the same node multiple times.
+- Once you observe the suspicious upstream node, you MUST execute a fix (like drain_connections, rollback, or restart).
+- If you find the issue and fix it, the final action must be 'declare_root_cause' with the node and failure_type.
+"""
+
+
+def wait_for_server(max_retries: int = 15, sleep_seconds: int = 1) -> bool:
+    print(f"Waiting for server at {API_BASE_URL} ...")
+    for _ in range(max_retries):
+        try:
+            response = requests.get(f"{API_BASE_URL}/", timeout=10)
+            if response.status_code == 200:
+                print("Server is up!")
+                return True
+        except Exception:
+            time.sleep(sleep_seconds)
+    return False
+
+
+def run_smart_agent(scenario_id: str, external_call: bool = False) -> float:
+    """
+    Runs the LLM agent against a scenario.
+    external_call=True mutes most print statements for automated evaluators.
+    """
+    if not external_call:
+        print(f"\n========== RUNNING SMART AGENT: {scenario_id} ==========")
+
+    try:
+        state = requests.post(
+            f"{API_BASE_URL}/reset",
+            params={"scenario_id": scenario_id},
+            timeout=30
+        ).json()
+    except Exception as e:
+        if not external_call:
+            print(f"Failed to reset server: {e}")
+        return 0.0
+
+    max_steps = state.get("steps_remaining", 15)
+
+    for _ in range(max_steps):
+        if not external_call:
+            print(
+                f"\n[Step {state.get('step')}] "
+                f"Health: {state.get('system_health')} | "
+                f"Remaining: {state.get('steps_remaining')}"
+            )
+
+        prompt = f"CURRENT STATE:\n{json.dumps(state, indent=2)}\n\nWhat is your next move?"
+
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+
+            content = response.choices[0].message.content
+            decision = json.loads(content)
+
+            if not external_call:
+                print(f"🤖 THOUGHT: {decision.get('thought')}")
+
+            action_payload = decision.get("action", {})
+            req_body = {
+                "action": action_payload.get("action_type", "observe"),
+                "target": action_payload.get("target", "api_gateway")
+            }
+
+            if "failure_type" in action_payload and action_payload["failure_type"] is not None:
+                req_body["failure_type"] = action_payload["failure_type"]
+
+            if not external_call:
+                print(f"⚡ ACTION: {req_body['action']} -> {req_body['target']}")
+
+        except Exception as e:
+            if not external_call:
+                print(f"LLM Error: {e}")
+            break
+
+        try:
+            res = requests.post(
+                f"{API_BASE_URL}/step",
+                json=req_body,
+                timeout=30
+            ).json()
+        except Exception as e:
+            if not external_call:
+                print(f"Server execution error: {e}")
+            break
+
+        if res.get("info", {}).get("message") and not external_call:
+            print(f"SERVER MSG: {res['info']['message']}")
+
+        if res.get("done"):
+            break
+
+        state = res.get("observation", state)
+
+    final_score = 0.0
+    try:
+        score_data = requests.get(f"{API_BASE_URL}/grader", timeout=30).json()
+
+        if "total" in score_data:
+            final_score = float(score_data["total"])
+
+            if not external_call:
+                print("\n========== EPISODE COMPLETE ==========")
+                print(f"FINAL SCORE: {final_score * 100}%")
+                print(json.dumps(score_data.get("breakdown", {}), indent=2))
+        else:
+            if not external_call:
+                print("\n========== EPISODE ENDED EARLY ==========")
+                print(f"Server returned: {score_data}")
+
+    except Exception as e:
+        if not external_call:
+            print(f"Failed to fetch final score: {e}")
+
+    return final_score
+
+
+def run_baseline_suite() -> dict:
+    """
+    Runs one task from each difficulty bucket.
+    """
+    test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
+    scores = {}
+
+    for task in test_tasks:
+        try:
+            scores[task] = run_smart_agent(task, external_call=True)
+        except Exception as e:
+            scores[task] = {"error": str(e)}
+
+    return scores
+
+
+if __name__ == "__main__":
+    if wait_for_server():
+        results = run_baseline_suite()
+        print(json.dumps(results, indent=2))
+    else:
+        print("Server did not become available.")
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\models.py =====
+
+# from pydantic import BaseModel, Field
+# from typing import List, Dict, Optional
+# from enum import Enum
+# from openenv.core.models import Action, Observation
+
+# class FailureType(str, Enum):
+#     CRASH = "crash"
+#     MEMORY_LEAK = "memory_leak"
+#     CONN_EXHAUSTION = "connection_exhaustion"
+#     NETWORK_LATENCY = "network_latency"
+
+# class CascadeAction(Action):
+#     """The commands the agent can run."""
+#     cmd: str = Field(..., description="observe, restart, isolate, rollback, or declare_root_cause")
+#     node_id: str = Field(..., description="Target node ID (e.g., 'postgres_primary')")
+#     declared_failure: Optional[FailureType] = Field(None)
+
+# class NodeInfo(BaseModel): 
+#     status: str  # "healthy", "degraded", "critical", "hidden"
+#     latency_ms: float
+#     is_observable: bool = False
+
+# class CascadeObservation(Observation):
+#     """The dashboard provided to the agent at each step."""
+#     system_health: float = Field(..., ge=0.0, le=1.0)
+#     nodes: Dict[str, NodeInfo]
+#     steps_remaining: int
+#     active_alerts: List[str]
+# from pydantic import BaseModel
+# from typing import Dict, List, Optional, Union, Any
+
+# class Action(BaseModel):
+#     action: str
+#     target: str
+#     failure_type: Optional[str] = None
+
+# class NodeView(BaseModel):
+#     status: str
+#     health: Union[float, str]
+#     visible_symptoms: List[str]
+#     is_isolated: bool
+
+# class Observation(BaseModel):
+#     step: int
+#     steps_remaining: int
+#     system_health: float
+#     nodes: Dict[str, NodeView]
+#     active_alerts: List[dict]
+#     intervention_log: List[dict]
+#     cascade_risk: str
+
+# # --- NEW: Strict OpenEnv Return Models ---
+# class StepResponse(BaseModel):
+#     observation: Observation
+#     reward: float  # Required by spec
+#     done: bool     # Required by spec
+#     info: Dict[str, Any] # Required by spec
+
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Union, Any
+
+
+class Action(BaseModel):
+    action: str
+    target: str
+    failure_type: Optional[str] = None
+
+
+class NodeView(BaseModel):
+    status: str
+    health: Union[float, str]
+    visible_symptoms: List[str]
+    is_isolated: bool
+
+
+class Observation(BaseModel):
+    step: int
+    steps_remaining: int
+    system_health: float
+    nodes: Dict[str, NodeView]
+    active_alerts: List[dict]
+    intervention_log: List[dict]
+    cascade_risk: str
+
+
+class StepResponse(BaseModel):
+    observation: Observation
+    reward: float
+    done: bool
+    info: Dict[str, Any] = Field(default_factory=dict)
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\openenv.yaml =====
+
+# name: cascade_debug_env
+# version: "0.1.0"
+# description: "A cascading failure diagnosis environment for SRE agents."
+# # This tells the system where to find your logic class
+# entry_point: "server.cascade_debug_env_environment:CascadeDebugEnv"
+# author: "Prabhjot Singh"
+# tags: ["openenv", "devops", "sre"]
+# openenv.yaml
+name: cascade-debug-env
+description: OpenEnv-compatible debugging environment for cascading distributed system diagnosis.
+entrypoints:
+  reset: /reset
+  step: /step
+  state: /state
+build:
+  dockerfile: Dockerfile
+server:
+  port: 7860
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\pyproject.toml =====
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-cascade_debug_env"
+version = "0.1.0"
+description = "Cascade Debug Env environment for OpenEnv"
+requires-python = ">=3.10"
+dependencies = [
+    # Core OpenEnv runtime (provides FastAPI server + HTTP client types)
+    # install from github
+    # "openenv-core[core] @ git+https://github.com/meta-pytorch/OpenEnv.git",
+    "openenv-core[core]>=0.2.1",
+    # Environment-specific dependencies
+    # Add all dependencies needed for your environment here
+    # Examples:
+    # "numpy>=1.19.0",
+    # "torch>=2.0.0",
+    # "gymnasium>=0.29.0",
+    # "openspiel>=1.0.0",
+    # "smolagents>=1.22.0,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+# Server entry point - enables running via: uv run --project . server
+# or: python -m cascade_debug_env.server.app
+server = "cascade_debug_env.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = ["cascade_debug_env", "cascade_debug_env.server"]
+package-dir = { "cascade_debug_env" = ".", "cascade_debug_env.server" = "server" }
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\README.md =====
+
+---
+title: CascadeDebugEnv
+emoji: 🐙
+colorFrom: yellow
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: META HACKATHON
+---
+
+# CascadeDebugEnv
+
+OpenEnv-compatible debugging environment for the Meta hackathon.
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\requirements.txt =====
+
+# fastapi
+# uvicorn
+# pydantic
+# requests
+
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+requests
+python-dotenv
+openai
+pyyaml
+openenv-core
+
+
+===== FILE: C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\__init__.py =====
+
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""Cascade Debug Env Environment."""
+
+from .client import CascadeDebugEnv
+from .models import CascadeDebugAction, CascadeDebugObservation
+
+__all__ = [
+    "CascadeDebugAction",
+    "CascadeDebugObservation",
+    "CascadeDebugEnv",
+]
