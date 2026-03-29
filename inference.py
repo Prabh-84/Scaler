@@ -7,7 +7,7 @@ from openai import OpenAI
 # -----------------------------
 # Environment Configuration
 # -----------------------------
-API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
