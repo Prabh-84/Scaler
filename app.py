@@ -425,7 +425,6 @@ def get_tasks():
         "action_schema": Action.model_json_schema()
     }
 
-# FIX 1: The reset endpoint signature MUST have a default value to prevent the POST error!
 @app.post("/reset", response_model=Observation)
 def reset(scenario_id: Optional[str] = "easy_e1"):
     global active_env
@@ -502,14 +501,10 @@ def run_baseline():
             scores[task] = {"error": str(e)}
     return {"baseline_scores": scores}
 
-# FIX 2: The main block required by the validator!
-def main(host: str = "0.0.0.0", port: int = 7860):
+# --- MULTI-MODE DEPLOYMENT BLOCK (REQUIRED BY VALIDATOR) ---
+def main():
     import uvicorn
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=7860)
-    args = parser.parse_args()
-    main(port=args.port)
+if __name__ == '__main__':
+    main()
