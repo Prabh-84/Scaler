@@ -376,19 +376,35 @@ from server.cascade_debug_env_environment import CascadeDebugEnvironment
 
 app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
 
-# --- Scenario Loading ---
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCENARIO_DIR = os.path.join(BASE_DIR, "scenarios")
+# --- Bulletproof Scenario Loading ---
+def load_scenarios() -> dict:
+    scenarios = {}
+    
+    # Start searching from the Docker root directory (/app) or the current file directory
+    search_dir = "/app" if os.path.exists("/app") else os.path.dirname(os.path.abspath(__file__))
+    
+    # Walk through EVERY folder and file in the directory
+    for root, dirs, files in os.walk(search_dir):
+        for fname in files:
+            if fname.endswith(".json"):
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        # If it looks like a scenario, load it!
+                        if isinstance(data, dict) and "scenario_id" in data:
+                            scenarios[data["scenario_id"]] = data
+                except Exception:
+                    pass # Ignore any irrelevant JSON files
+                    
+    if not scenarios:
+        print(f"CRITICAL ERROR: No scenario JSON files found ANYWHERE in {search_dir}!")
+        
+    return scenarios
 
 SCENARIOS = {}
 try:
-    if os.path.exists(SCENARIO_DIR):
-        for fname in os.listdir(SCENARIO_DIR):
-            if fname.endswith(".json"):
-                with open(os.path.join(SCENARIO_DIR, fname), "r", encoding="utf-8") as f:
-                    s = json.load(f)
-                    if "scenario_id" in s:
-                        SCENARIOS[s["scenario_id"]] = s
+    SCENARIOS = load_scenarios()
 except Exception as e:
     print(f"[Startup Error] Failed to load scenarios: {e}")
 
