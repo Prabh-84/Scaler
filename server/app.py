@@ -379,11 +379,8 @@ app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
 # --- Bulletproof Scenario Loading ---
 def load_scenarios() -> dict:
     scenarios = {}
-    
-    # Start searching from the Docker root directory (/app) or the current file directory
     search_dir = "/app" if os.path.exists("/app") else os.path.dirname(os.path.abspath(__file__))
     
-    # Walk through EVERY folder and file in the directory
     for root, dirs, files in os.walk(search_dir):
         for fname in files:
             if fname.endswith(".json"):
@@ -391,11 +388,10 @@ def load_scenarios() -> dict:
                 try:
                     with open(fpath, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        # If it looks like a scenario, load it!
                         if isinstance(data, dict) and "scenario_id" in data:
                             scenarios[data["scenario_id"]] = data
                 except Exception:
-                    pass # Ignore any irrelevant JSON files
+                    pass
                     
     if not scenarios:
         print(f"CRITICAL ERROR: No scenario JSON files found ANYWHERE in {search_dir}!")
@@ -414,38 +410,29 @@ active_env = None
 
 @app.get("/")
 def health_check():
-    """Basic health check endpoint."""
     return {
         "status": "ok", 
         "loaded_scenarios": list(SCENARIOS.keys()),
         "scenario_count": len(SCENARIOS)
     }
 
-# REQUIRED ENDPOINT 1: /tasks
 @app.get("/tasks")
 def get_tasks():
-    """Returns the list of available tasks and the JSON schema for Actions."""
     if not SCENARIOS:
         raise HTTPException(status_code=500, detail="No scenarios loaded.")
-        
     return {
         "tasks": list(SCENARIOS.keys()),
         "action_schema": Action.model_json_schema()
     }
 
-# REQUIRED ENDPOINT 2: /reset
+# FIX 1: The reset endpoint signature MUST have a default value to prevent the POST error!
 @app.post("/reset", response_model=Observation)
 def reset(scenario_id: Optional[str] = "easy_e1"):
-    """
-    Initializes the environment for a given scenario and returns the first observation.
-    Defaulting to 'easy_e1' ensures the automated validator doesn't crash on empty POSTs.
-    """
     global active_env
     
     if not SCENARIOS:
         raise HTTPException(status_code=500, detail="No scenarios loaded.")
 
-    # Fallback just in case the validator passes null or an invalid string
     if not scenario_id or scenario_id not in SCENARIOS:
         scenario_id = "easy_e1"
 
@@ -453,43 +440,30 @@ def reset(scenario_id: Optional[str] = "easy_e1"):
         active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
         return active_env.get_observation()
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to initialize scenario '{scenario_id}': {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to initialize scenario '{scenario_id}': {str(e)}")
 
-# REQUIRED ENDPOINT 3: /state
 @app.get("/state", response_model=Observation)
 def get_state():
-    """Returns the current state of the environment."""
     global active_env
     if not active_env:
         raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
-    
     try:
         return active_env.get_observation()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch state: {str(e)}")
 
-# REQUIRED ENDPOINT 4: /step
 @app.post("/step", response_model=StepResponse)
 def step(req: Action):
-    """Takes an action and returns observation, reward, done, and info."""
     global active_env
     if not active_env:
         raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
-    
     try:
         result = active_env.step(req.action, req.target, req.failure_type)
-        
-        # Calculate intermediate reward (partial progress)
-        # OpenEnv requires a float reward signal.
         reward = 0.0
         if active_env.state.done:
             score_data = active_env.get_score()
             if isinstance(score_data, dict):
                 reward = float(score_data.get("total", 0.0))
-        
         return {
             "observation": result.get("observation"),
             "reward": reward,
@@ -499,54 +473,36 @@ def step(req: Action):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Step execution failed: {str(e)}")
 
-# REQUIRED ENDPOINT 5: /grader
 @app.get("/grader")
 def get_score():
-    """Returns the final score breakdown after an episode finishes."""
     global active_env
-    
     if not active_env:
         raise HTTPException(status_code=400, detail="No active episode.")
-    
     if not active_env.state.done:
-        raise HTTPException(
-            status_code=400, 
-            detail="Episode not complete. Must declare root cause or run out of steps."
-        )
-    
+        raise HTTPException(status_code=400, detail="Episode not complete.")
     try:
         return active_env.get_score()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to compute grade: {str(e)}")
 
-# REQUIRED ENDPOINT 6: /baseline
 @app.get("/baseline")
 def run_baseline():
-    """Triggers the inference script and returns baseline scores for validation."""
     try:
-        # Import the Groq-powered LLM agent from inference.py
         from inference import run_smart_agent 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to import baseline agent from inference.py: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to import baseline agent: {str(e)}")
     
     scores = {}
-    # Test one from each difficulty to prove it works to the validators
     test_tasks = ["easy_e1", "medium_m2", "hard_h2"] 
-    
     for task in test_tasks:
         try:
-            # external_call=True mutes the terminal prints so it doesn't clutter the server logs
             score = run_smart_agent(task, external_call=True) 
             scores[task] = score
         except Exception as e:
             scores[task] = {"error": str(e)}
-            
     return {"baseline_scores": scores}
 
-# --- REQUIRED BY VALIDATOR ---
+# FIX 2: The main block required by the validator!
 def main(host: str = "0.0.0.0", port: int = 7860):
     import uvicorn
     uvicorn.run(app, host=host, port=port)
