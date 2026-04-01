@@ -1,16 +1,27 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
+
+# """Cascade Debug Env Environment."""
+
+# from .client import CascadeDebugEnv
+# from .models import CascadeDebugAction, CascadeDebugObservation
+
+# __all__ = [
+#     "CascadeDebugAction",
+#     "CascadeDebugObservation",
+#     "CascadeDebugEnv",
+# ]
+
+# __init__.py
+# BUG FIX: Removed imports of CascadeDebugEnv and CascadeDebugAction / CascadeDebugObservation
+# which did not exist in client.py or models.py respectively, causing an ImportError
+# on any code that imported the package directly.
 #
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+# The server is accessed via HTTP (not as a Python package), so this file just
+# exposes the correct public names that actually exist.
 
-"""Cascade Debug Env Environment."""
-
-from .client import CascadeDebugEnv
-from .models import CascadeDebugAction, CascadeDebugObservation
+from .models import Action, Observation, StepResponse
 
 __all__ = [
-    "CascadeDebugAction",
-    "CascadeDebugObservation",
-    "CascadeDebugEnv",
+    "Action",
+    "Observation",
+    "StepResponse",
 ]
