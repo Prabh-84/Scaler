@@ -651,7 +651,7 @@ def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) ->
 # ---------------------------------------------------------------------------
 # 🔥 FRONTEND SERVE (ONLY CHANGE)
 # ---------------------------------------------------------------------------
-app.mount("/", StaticFiles(directory="chaos-frontend/out", html=True), name="frontend")
+app.mount("/ui", StaticFiles(directory="chaos-frontend/out", html=True), name="frontend")
 
 
 # ---------------------------------------------------------------------------
