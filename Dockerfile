@@ -20,7 +20,7 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install Node.js (better version setup)
+# Install Node.js
 RUN apt-get update && apt-get install -y curl && \
     curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
     apt-get install -y nodejs
@@ -35,15 +35,16 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy project
 COPY . /app
 
-# Install frontend + build
+# 🔥 FRONTEND BUILD (STATIC EXPORT)
 WORKDIR /app/chaos-frontend
 RUN npm install
 RUN npm run build
+RUN npx next export
 
 # Back to root
 WORKDIR /app
 
 EXPOSE 7860
 
-# ✅ FIXED CMD (frontend + backend properly run)
-CMD sh -c "cd chaos-frontend && npm run start & uvicorn app:app --host 0.0.0.0 --port 7860"
+# ✅ ONLY backend runs (frontend will be served statically)
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
