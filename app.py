@@ -538,7 +538,8 @@
 #     return {"baseline_scores": scores}
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles  # ✅ ADDED
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse  # ✅ ADDED
 from typing import Optional
 import json
 import os
@@ -649,13 +650,20 @@ def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) ->
 
 
 # ---------------------------------------------------------------------------
-# 🔥 FRONTEND SERVE (ONLY CHANGE)
+# 🔥 FRONTEND SERVE (FIXED PROPERLY)
 # ---------------------------------------------------------------------------
-app.mount("/ui", StaticFiles(directory="chaos-frontend/out", html=True), name="frontend")
+
+# Serve main UI on "/"
+@app.get("/")
+def serve_frontend():
+    return FileResponse("chaos-frontend/out/index.html")
+
+# Serve Next.js static assets
+app.mount("/_next", StaticFiles(directory="chaos-frontend/out/_next"), name="next")
 
 
 # ---------------------------------------------------------------------------
-# Endpoints
+# Endpoints (UNCHANGED)
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
