@@ -3,3 +3,4 @@ node_modules/
 build/
 dist/
 chaos-frontend/node_modules/
+.next/
