@@ -39,7 +39,7 @@ COPY . /app
 WORKDIR /app/chaos-frontend
 RUN npm install
 RUN npm run build
-RUN npx next export
+
 
 # Back to root
 WORKDIR /app
