@@ -1,3 +1,15 @@
+---
+title: CascadeDebugEnv
+emoji: 🐙
+colorFrom: yellow
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+short_description: Cascading failure diagnosis environment for SRE agents
+---
+
 
 # Cascade Debug Environment
 
