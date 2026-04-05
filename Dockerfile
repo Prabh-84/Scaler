@@ -20,25 +20,30 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install Node.js (for Next.js)
-RUN apt-get update && apt-get install -y nodejs npm
+# Install Node.js (better version setup)
+RUN apt-get update && apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+    apt-get install -y nodejs
 
 WORKDIR /app
 
+# Install backend dependencies
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r /app/requirements.txt
 
+# Copy project
 COPY . /app
 
-# Install frontend deps + build
+# Install frontend + build
 WORKDIR /app/chaos-frontend
 RUN npm install
 RUN npm run build
 
+# Back to root
 WORKDIR /app
 
 EXPOSE 7860
 
-# 🔥 IMPORTANT: run frontend + backend together
-CMD sh -c "npm --prefix chaos-frontend start & uvicorn app:app --host 0.0.0.0 --port 7860"
+# ✅ FIXED CMD (frontend + backend properly run)
+CMD sh -c "cd chaos-frontend && npm run start & uvicorn app:app --host 0.0.0.0 --port 7860"
