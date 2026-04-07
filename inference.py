@@ -1,4 +1,33 @@
 
+# """
+# inference.py — CascadeDebugEnv baseline agent
+# ==============================================
+
+# HACKATHON VALIDATOR REQUIREMENTS (all satisfied):
+#   [x] API_BASE_URL  = os.getenv("API_BASE_URL", "<default>")
+#   [x] MODEL_NAME    = os.getenv("MODEL_NAME",   "<default>")
+#   [x] HF_TOKEN      = os.getenv("HF_TOKEN")          -- NO default
+#   [x] LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") -- optional
+#   [x] OpenAI client uses base_url=API_BASE_URL and api_key=API_KEY
+#       where API_KEY = os.environ["API_KEY"]  (validator injects this)
+#   [x] [START] / [STEP] / [END] plain-text stdout logs, flush=True
+#   [x] No module-level raise / crash
+#   [x] No hardcoded keys or other providers
+
+# CRITICAL FIX vs submission #32:
+#   The validator injects two env vars:
+#     API_BASE_URL  — the LiteLLM proxy URL  (must use as base_url)
+#     API_KEY       — the LiteLLM proxy key  (must use as api_key)
+
+#   Previous submissions used OPENAI_API_KEY / HF_TOKEN for the client key.
+#   The LiteLLM proxy key was NEVER used → validator saw zero API calls through
+#   its proxy → "No API calls were made through our LLM proxy".
+
+#   Fix: client is always initialised with:
+#     api_key  = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or ...
+#     base_url = API_BASE_URL   (which IS the proxy URL when validator runs)
+# """
+
 # import requests
 # import time
 # import json
@@ -335,29 +364,13 @@
 inference.py — CascadeDebugEnv baseline agent
 ==============================================
 
-HACKATHON VALIDATOR REQUIREMENTS (all satisfied):
-  [x] API_BASE_URL  = os.getenv("API_BASE_URL", "<default>")
-  [x] MODEL_NAME    = os.getenv("MODEL_NAME",   "<default>")
-  [x] HF_TOKEN      = os.getenv("HF_TOKEN")          -- NO default
-  [x] LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") -- optional
+HACKATHON VALIDATOR REQUIREMENTS:
+  [x] API_BASE_URL and API_KEY are taken strictly from os.environ
+  [x] MODEL_NAME is read from env with a default
+  [x] HF_TOKEN and LOCAL_IMAGE_NAME remain present
   [x] OpenAI client uses base_url=API_BASE_URL and api_key=API_KEY
-      where API_KEY = os.environ["API_KEY"]  (validator injects this)
   [x] [START] / [STEP] / [END] plain-text stdout logs, flush=True
-  [x] No module-level raise / crash
-  [x] No hardcoded keys or other providers
-
-CRITICAL FIX vs submission #32:
-  The validator injects two env vars:
-    API_BASE_URL  — the LiteLLM proxy URL  (must use as base_url)
-    API_KEY       — the LiteLLM proxy key  (must use as api_key)
-
-  Previous submissions used OPENAI_API_KEY / HF_TOKEN for the client key.
-  The LiteLLM proxy key was NEVER used → validator saw zero API calls through
-  its proxy → "No API calls were made through our LLM proxy".
-
-  Fix: client is always initialised with:
-    api_key  = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or ...
-    base_url = API_BASE_URL   (which IS the proxy URL when validator runs)
+  [x] No hardcoded keys or provider URLs
 """
 
 import requests
@@ -371,39 +384,18 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 # Environment configuration
 # Validator injects: API_BASE_URL, API_KEY, MODEL_NAME
-# Checklist also requires: HF_TOKEN (no default), LOCAL_IMAGE_NAME (optional)
 # ---------------------------------------------------------------------------
 
-API_BASE_URL     = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
-MODEL_NAME       = os.getenv("MODEL_NAME",   "llama-3.3-70b-versatile")
-HF_TOKEN         = os.getenv("HF_TOKEN")           # NO default (checklist rule)
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, for from_docker_image()
+API_BASE_URL     = os.environ["API_BASE_URL"].rstrip("/")
+API_KEY          = os.environ["API_KEY"]
+MODEL_NAME       = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+HF_TOKEN         = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
-# ---------------------------------------------------------------------------
-# API_KEY resolution — CRITICAL
-#
-# The validator injects "API_KEY" as the LiteLLM proxy key.
-# Resolution order (first non-empty wins):
-#   1. API_KEY       ← what the validator injects (MUST come first)
-#   2. HF_TOKEN      ← hackathon-required fallback
-#   3. OPENAI_API_KEY ← local dev override
-#   4. "placeholder" ← last resort so client never crashes at init
-#
-# The client base_url MUST be API_BASE_URL (the proxy URL).
-# Never use a hardcoded provider URL like api.groq.com when running via validator.
-# ---------------------------------------------------------------------------
-
-API_KEY = (
-    os.getenv("API_KEY")        # validator-injected LiteLLM proxy key  ← CRITICAL
-    or os.getenv("HF_TOKEN")
-    or os.getenv("OPENAI_API_KEY")
-    or "placeholder"
-)
-
-# All LLM calls go through the OpenAI client configured with the proxy vars
+# All LLM calls must go through the validator-provided proxy
 client = OpenAI(
     api_key=API_KEY,
-    base_url=API_BASE_URL,   # This IS the LiteLLM proxy when validator runs
+    base_url=API_BASE_URL,
 )
 
 # ---------------------------------------------------------------------------
