@@ -1,4 +1,13 @@
 
+# """
+# app.py — root-level FastAPI server (Dockerfile entry point)
+
+# This is the OpenEnv-compatible HTTP server for CascadeDebugEnv.
+# The validator pings this server at the HF Space URL.
+# inference.py talks to THIS server via API_BASE_URL for env calls (reset/step/grader).
+# LLM calls in inference.py go to API_BASE_URL which the validator redirects
+# through its LiteLLM proxy.
+# """
 
 # from fastapi import FastAPI, HTTPException
 # from typing import Optional
@@ -229,17 +238,9 @@
 #         except Exception as exc:
 #             scores[task] = {"error": str(exc)}
 #     return {"baseline_scores": scores}
-"""
-app.py — root-level FastAPI server (Dockerfile entry point)
-
-This is the OpenEnv-compatible HTTP server for CascadeDebugEnv.
-The validator pings this server at the HF Space URL.
-inference.py talks to THIS server via API_BASE_URL for env calls (reset/step/grader).
-LLM calls in inference.py go to API_BASE_URL which the validator redirects
-through its LiteLLM proxy.
-"""
-
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from typing import Optional
 import json
 import os
@@ -256,7 +257,7 @@ from server.cascade_debug_env_environment import CascadeDebugEnvironment
 app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
 
 # ---------------------------------------------------------------------------
-# Scenario loading — raise at startup if broken, so container exits cleanly
+# Scenario loading
 # ---------------------------------------------------------------------------
 
 def load_scenarios() -> dict:
@@ -288,19 +289,40 @@ def load_scenarios() -> dict:
 
 SCENARIOS: dict = load_scenarios()
 
-_env_lock:  threading.Lock                        = threading.Lock()
-active_env: Optional[CascadeDebugEnvironment]     = None
+_env_lock: threading.Lock = threading.Lock()
+active_env: Optional[CascadeDebugEnvironment] = None
 
+# ---------------------------------------------------------------------------
+# Frontend static export setup
+# ---------------------------------------------------------------------------
+
+# Next export output path
+FRONTEND_OUT_DIR_CANDIDATES = [
+    os.path.join(ROOT_DIR, "chaos-frontend", "out"),
+    "/app/chaos-frontend/out",
+]
+
+FRONTEND_OUT_DIR = next(
+    (d for d in FRONTEND_OUT_DIR_CANDIDATES if os.path.isdir(d)),
+    None,
+)
+
+if FRONTEND_OUT_DIR:
+    assets_dir = os.path.join(FRONTEND_OUT_DIR, "_next")
+    if os.path.isdir(assets_dir):
+        app.mount("/_next", StaticFiles(directory=assets_dir), name="next_assets")
+
+    # Optional common static dirs if they exist
+    for static_name in ["static", "images"]:
+        static_path = os.path.join(FRONTEND_OUT_DIR, static_name)
+        if os.path.isdir(static_path):
+            app.mount(f"/{static_name}", StaticFiles(directory=static_path), name=static_name)
 
 # ---------------------------------------------------------------------------
 # Intermediate reward shaping
 # ---------------------------------------------------------------------------
 
 def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) -> float:
-    """
-    Shaped reward signal computed BEFORE executing the action.
-    Terminal step reward is replaced by the final grader total.
-    """
     reward = 0.0
 
     if action.action == "observe":
@@ -318,9 +340,8 @@ def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) ->
         reward += 0.03
 
     elif action.action == "declare_root_cause":
-        reward -= 0.05  # mild penalty to discourage premature declarations
+        reward -= 0.05
 
-    # Penalise documented trap actions
     try:
         gt = env.scenario_dict.get("ground_truth", {})
         for trap in gt.get("trap_actions", []):
@@ -336,21 +357,9 @@ def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) ->
 
     return round(reward, 4)
 
-
 # ---------------------------------------------------------------------------
-# Endpoints
+# API endpoints
 # ---------------------------------------------------------------------------
-
-@app.get("/")
-def health_check():
-    return {
-        "status": "ok",
-        "cwd": os.getcwd(),
-        "base_dir": ROOT_DIR,
-        "scenario_count": len(SCENARIOS),
-        "loaded_scenarios": sorted(SCENARIOS.keys()),
-    }
-
 
 @app.get("/tasks")
 def get_tasks():
@@ -365,17 +374,13 @@ def get_tasks():
 @app.get("/schema")
 def get_schema():
     return {
-        "action_schema":      Action.model_json_schema(),
+        "action_schema": Action.model_json_schema(),
         "observation_schema": Observation.model_json_schema(),
     }
 
 
 @app.post("/reset", response_model=Observation)
 def reset(scenario_id: Optional[str] = None):
-    """
-    Initialises the environment.
-    Bare POST /reset (no query param) defaults to easy_e1 — never 422s the validator.
-    """
     global active_env
     if not SCENARIOS:
         raise HTTPException(status_code=500, detail="No scenarios loaded.")
@@ -403,10 +408,6 @@ def get_state():
 
 @app.post("/step", response_model=StepResponse)
 def step(req: Action):
-    """
-    Executes one action.
-    Intermediate reward on non-terminal steps; final grader total on terminal steps.
-    """
     global active_env
     with _env_lock:
         if active_env is None:
@@ -425,9 +426,9 @@ def step(req: Action):
 
             return {
                 "observation": result.get("observation"),
-                "reward":      reward,
-                "done":        result.get("done", False),
-                "info":        {"message": result.get("message", "")},
+                "reward": reward,
+                "done": result.get("done", False),
+                "info": {"message": result.get("message", "")},
             }
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Step failed: {exc}")
@@ -435,7 +436,6 @@ def step(req: Action):
 
 @app.get("/grader")
 def get_score():
-    """Returns the final score breakdown. Only valid after done=True."""
     global active_env
     with _env_lock:
         if active_env is None:
@@ -455,7 +455,6 @@ def get_score():
 
 @app.get("/baseline")
 def run_baseline():
-    """Runs baseline LLM agent on easy/medium/hard and returns scores."""
     try:
         from inference import run_smart_agent
     except Exception as exc:
@@ -468,3 +467,43 @@ def run_baseline():
         except Exception as exc:
             scores[task] = {"error": str(exc)}
     return {"baseline_scores": scores}
+
+# ---------------------------------------------------------------------------
+# Frontend routes
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+def serve_frontend_index():
+    if FRONTEND_OUT_DIR:
+        index_path = os.path.join(FRONTEND_OUT_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+    return {
+        "status": "ok",
+        "message": "Frontend build not found",
+        "scenario_count": len(SCENARIOS),
+        "loaded_scenarios": sorted(SCENARIOS.keys()),
+    }
+
+
+@app.get("/{full_path:path}")
+def serve_frontend_spa(full_path: str):
+    # Don't hijack API routes
+    blocked_prefixes = ("tasks", "schema", "reset", "state", "step", "grader", "baseline", "docs", "openapi.json", "redoc")
+    if full_path.startswith(blocked_prefixes):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if FRONTEND_OUT_DIR:
+        target_path = os.path.join(FRONTEND_OUT_DIR, full_path)
+
+        if os.path.isfile(target_path):
+            return FileResponse(target_path)
+
+        if os.path.isfile(target_path + ".html"):
+            return FileResponse(target_path + ".html")
+
+        index_path = os.path.join(FRONTEND_OUT_DIR, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+
+    raise HTTPException(status_code=404, detail="Frontend file not found")
