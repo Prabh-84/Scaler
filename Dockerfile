@@ -15,7 +15,7 @@
 # EXPOSE 7860
 
 # CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
-FROM python:3.10-slim
+FROM python:3.10.16-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
