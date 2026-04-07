@@ -8,83 +8,72 @@
 # from openai import OpenAI
 
 # # ---------------------------------------------------------------------------
-# # Environment configuration — all read from env vars for Docker compatibility
+# # Environment configuration
+# # Validator injects: API_BASE_URL, API_KEY, MODEL_NAME
+# # Checklist also requires: HF_TOKEN (no default), LOCAL_IMAGE_NAME (optional)
 # # ---------------------------------------------------------------------------
 
-# # The hackathon mandates these three variables in the environment config.
-# # We use them here so the validator's container always has something to work with.
-# API_BASE_URL  = os.getenv("API_BASE_URL",  "http://127.0.0.1:7860").rstrip("/")
-# MODEL_NAME    = os.getenv("MODEL_NAME",    "llama-3.3-70b-versatile")
-# HF_TOKEN      = os.getenv("HF_TOKEN",      "")  # hackathon-required var
+# API_BASE_URL     = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
+# MODEL_NAME       = os.getenv("MODEL_NAME",   "llama-3.3-70b-versatile")
+# HF_TOKEN         = os.getenv("HF_TOKEN")           # NO default (checklist rule)
+# LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, for from_docker_image()
 
-# # Key resolution (never raise at module level — validators run without env vars):
-# #   1. OPENAI_API_KEY  (set explicitly by operator)
-# #   2. HF_TOKEN        (hackathon-required; Groq keys start with gsk_)
-# #   3. "MISSING_KEY"   (placeholder — OpenAI client init won't crash; LLM calls fail
-# #                       gracefully inside try/except, and _declare_best_guess() fires)
-# OPENAI_API_KEY  = (
-#     os.getenv("OPENAI_API_KEY")
-#     or HF_TOKEN
-#     or "MISSING_KEY"
+# # ---------------------------------------------------------------------------
+# # API_KEY resolution — CRITICAL
+# #
+# # The validator injects "API_KEY" as the LiteLLM proxy key.
+# # Resolution order (first non-empty wins):
+# #   1. API_KEY       ← what the validator injects (MUST come first)
+# #   2. HF_TOKEN      ← hackathon-required fallback
+# #   3. OPENAI_API_KEY ← local dev override
+# #   4. "placeholder" ← last resort so client never crashes at init
+# #
+# # The client base_url MUST be API_BASE_URL (the proxy URL).
+# # Never use a hardcoded provider URL like api.groq.com when running via validator.
+# # ---------------------------------------------------------------------------
+
+# API_KEY = (
+#     os.getenv("API_KEY")        # validator-injected LiteLLM proxy key  ← CRITICAL
+#     or os.getenv("HF_TOKEN")
+#     or os.getenv("OPENAI_API_KEY")
+#     or "placeholder"
 # )
-# OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
 
-# # Build the client once at module level (no crash — key is always a string now)
+# # All LLM calls go through the OpenAI client configured with the proxy vars
 # client = OpenAI(
-#     api_key=OPENAI_API_KEY,
-#     base_url=OPENAI_BASE_URL,
+#     api_key=API_KEY,
+#     base_url=API_BASE_URL,   # This IS the LiteLLM proxy when validator runs
 # )
 
 # # ---------------------------------------------------------------------------
-# # Task / benchmark metadata (required by [START] log format)
+# # Constants
 # # ---------------------------------------------------------------------------
-
-# BENCHMARK  = "CascadeDebugEnv"
-# MAX_STEPS  = 15   # upper bound; actual budget comes from scenario step_budget
-# MAX_TOTAL_REWARD = 1.0   # scores are clamped to [0, 1]
+# BENCHMARK               = "CascadeDebugEnv"
 # SUCCESS_SCORE_THRESHOLD = 0.5
 
 # # ---------------------------------------------------------------------------
-# # Mandatory structured log helpers — [START] / [STEP] / [END]
+# # Mandatory structured log helpers
+# # Exact plain-text format required by validator:
+# #   [START] task=easy_e1 env=CascadeDebugEnv model=llama-3.3-70b-versatile
+# #   [STEP] step=1 action=observe:auth_service reward=0.08 done=False
+# #   [END] task=easy_e1 score=0.75 steps=4 success=True
+# # Rules: stdout only, flush=True, plain key=value (NOT JSON)
 # # ---------------------------------------------------------------------------
 
 # def log_start(task: str, env: str, model: str) -> None:
-#     """Emit the mandatory [START] log line."""
+#     print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+# def log_step(step: int, action: str, reward: float, done: bool) -> None:
 #     print(
-#         json.dumps({
-#             "event": "START",
-#             "task":  task,
-#             "env":   env,
-#             "model": model,
-#         }),
+#         f"[STEP] step={step} action={action} reward={round(reward, 4)} done={done}",
 #         flush=True,
 #     )
 
 
-# def log_step(step: int, action: dict, reward: float, done: bool, error=None) -> None:
-#     """Emit the mandatory [STEP] log line."""
-#     record = {
-#         "event":  "STEP",
-#         "step":   step,
-#         "action": action,
-#         "reward": reward,
-#         "done":   done,
-#     }
-#     if error is not None:
-#         record["error"] = str(error)
-#     print(json.dumps(record), flush=True)
-
-
-# def log_end(success: bool, steps: int, score: float, rewards: list) -> None:
-#     """Emit the mandatory [END] log line."""
+# def log_end(task: str, score: float, steps: int, success: bool) -> None:
 #     print(
-#         json.dumps({
-#             "event":   "END",
-#             "success": success,
-#             "steps":   steps,
-#             "score":   round(score, 4),
-#             "rewards": [round(r, 4) for r in rewards],
-#         }),
+#         f"[END] task={task} score={round(score, 4)} steps={steps} success={success}",
 #         flush=True,
 #     )
 
@@ -92,62 +81,61 @@
 # # ---------------------------------------------------------------------------
 # # SRE agent system prompt
 # # ---------------------------------------------------------------------------
+# SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) diagnosing a distributed microservice system.
+# You receive a JSON snapshot of the current system state.
 
-# SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed microservice system.
-# You will be given a JSON representation of the current system state.
-
-# You must output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
-# 1. "thought": A brief string explaining your reasoning (which node looks most suspicious, why).
-# 2. "action": An object with:
+# Respond with a single valid JSON object with exactly two keys:
+# 1. "thought": one sentence explaining your reasoning
+# 2. "action": object with:
 #    - "action_type": one of observe | restart | isolate | rollback | drain_connections | reroute_traffic | scale_replica | declare_root_cause
-#    - "target": the node id to act on
-#    - "failure_type": (only for declare_root_cause) your best guess at the failure type string
+#    - "target": node id (string)
+#    - "failure_type": string — ONLY include when action_type is declare_root_cause
 
-# RULES — follow these strictly:
-# - You CANNOT see a node's true health until you "observe" it. Always observe first.
-# - Do NOT take irreversible actions (isolate, restart, rollback) on a node you have NOT observed.
-# - Do NOT observe the same node twice.
-# - If a node is critical and you have observed it, apply a fix (rollback, drain_connections, or restart).
-# - Your final action MUST be "declare_root_cause" with the correct node and failure_type.
-# - Prefer observing upstream dependency chain nodes (api_gateway → auth_service → user_db etc.).
-# - Avoid trap actions — if an action looks obvious but the system description warns about it, skip it.
+# STRICT RULES:
+# - You cannot see a node's true health until you "observe" it. ALWAYS observe first.
+# - NEVER take irreversible actions (isolate, restart, rollback) on unobserved nodes.
+# - NEVER observe the same node twice.
+# - After observing a critical/degraded node, apply a fix action to it.
+# - Your FINAL action MUST be declare_root_cause with the correct node and failure_type.
+# - Follow dependency chains: api_gateway → auth_service → user_db, etc.
+# - Avoid documented trap actions — if something looks too obvious, think twice.
 # """
 
 
 # # ---------------------------------------------------------------------------
-# # Utility helpers
+# # Utilities
 # # ---------------------------------------------------------------------------
 
-# def wait_for_server(max_retries: int = 60, sleep_seconds: int = 1) -> bool:
-#     """Poll the server until it responds 200 or retries are exhausted."""
-#     print(f"[DEBUG] Waiting for server at {API_BASE_URL} ...", flush=True)
+# def wait_for_server(max_retries: int = 60, sleep_seconds: float = 1.0) -> bool:
+#     """Poll the local env server until 200 OK or retries are exhausted."""
+#     print(f"[INFO] Waiting for env server at {API_BASE_URL} ...", flush=True)
 #     for attempt in range(max_retries):
 #         try:
-#             response = requests.get(f"{API_BASE_URL}/", timeout=10)
-#             if response.status_code == 200:
-#                 print(f"[DEBUG] Server is up after {attempt + 1} attempt(s).", flush=True)
+#             r = requests.get(f"{API_BASE_URL}/", timeout=10)
+#             if r.status_code == 200:
+#                 print(f"[INFO] Server ready after {attempt + 1} attempt(s).", flush=True)
 #                 return True
 #         except Exception:
 #             pass
 #         time.sleep(sleep_seconds)
-#     print("[DEBUG] Server did not become available in time.", flush=True)
+#     print("[WARN] Env server did not become available in time.", flush=True)
 #     return False
 
 
-# def _declare_best_guess(state: dict, external_call: bool = False) -> dict:
+# def _best_guess_action(state: dict) -> dict:
 #     """
-#     Emergency fallback: picks the most suspicious visible node and issues
-#     declare_root_cause so the episode always ends with a grader score.
+#     Fallback when LLM errors or budget runs out without declare_root_cause.
+#     Picks the most suspicious node so the episode always ends with a score.
 
 #     Priority (lower = more suspicious):
 #       1 — critical status + visible symptoms
-#       2 — critical status (no symptoms)
-#       3 — degraded + visible symptoms
-#       4 — degraded (no symptoms)
-#       5 — any node with symptoms
-#       6 — everything else
+#       2 — critical status (no visible symptoms)
+#       3 — degraded status + visible symptoms
+#       4 — degraded status (no visible symptoms)
+#       5 — any node with visible symptoms
+#       6 — everything else (healthy / hidden)
 #     """
-#     nodes = state.get("nodes", {})
+#     nodes      = state.get("nodes", {})
 #     candidates = []
 
 #     for node_id, node_data in nodes.items():
@@ -156,30 +144,28 @@
 #         status   = node_data.get("status", "")
 
 #         if status == "critical" and symptoms:
-#             priority = 1
+#             prio = 1
 #         elif status == "critical":
-#             priority = 2
+#             prio = 2
 #         elif status == "degraded" and symptoms:
-#             priority = 3
+#             prio = 3
 #         elif status == "degraded":
-#             priority = 4
+#             prio = 4
 #         elif symptoms:
-#             priority = 5
+#             prio = 5
 #         else:
-#             priority = 6
+#             prio = 6
 
 #         h_val = health if isinstance(health, (int, float)) else 1.0
-#         candidates.append((priority, h_val, node_id, symptoms))
+#         candidates.append((prio, h_val, node_id, symptoms))
 
 #     candidates.sort(key=lambda x: (x[0], x[1]))
 
-#     best_node     = candidates[0][2] if candidates else "api_gateway"
-#     best_symptoms = candidates[0][3] if candidates else []
-#     failure_type  = best_symptoms[0] if best_symptoms else "unknown_failure"
+#     best_node    = candidates[0][2] if candidates else "api_gateway"
+#     best_syms    = candidates[0][3] if candidates else []
+#     failure_type = best_syms[0]     if best_syms   else "unknown_failure"
 
-#     if not external_call:
-#         print(f"[DEBUG] BestGuess fallback → {best_node} / {failure_type}", flush=True)
-
+#     print(f"[INFO] Best-guess fallback → {best_node} / {failure_type}", flush=True)
 #     return {
 #         "action":       "declare_root_cause",
 #         "target":       best_node,
@@ -189,10 +175,14 @@
 
 # def _call_llm(state: dict) -> dict | None:
 #     """
-#     Calls the LLM and returns a parsed req_body dict, or None on failure.
-#     Never raises — all exceptions are caught and logged.
+#     Calls the LLM through the OpenAI client (which points at API_BASE_URL).
+#     Returns a parsed req_body dict ready for POST /step, or None on failure.
+#     ALL LLM traffic goes through API_BASE_URL — the validator's LiteLLM proxy.
 #     """
-#     prompt = f"CURRENT STATE:\n{json.dumps(state, indent=2)}\n\nWhat is your next move?"
+#     prompt = (
+#         f"CURRENT SYSTEM STATE:\n{json.dumps(state, indent=2)}\n\n"
+#         "What is your next action? Respond with JSON only."
+#     )
 #     try:
 #         response = client.chat.completions.create(
 #             model=MODEL_NAME,
@@ -202,144 +192,115 @@
 #                 {"role": "user",   "content": prompt},
 #             ],
 #         )
-#         content  = response.choices[0].message.content
-#         decision = json.loads(content)
-
+#         content        = response.choices[0].message.content
+#         decision       = json.loads(content)
 #         action_payload = decision.get("action", {})
-#         req_body = {
+
+#         req_body: dict = {
 #             "action": action_payload.get("action_type", "observe"),
 #             "target": action_payload.get("target",      "api_gateway"),
 #         }
-#         if action_payload.get("failure_type") is not None:
-#             req_body["failure_type"] = action_payload["failure_type"]
+#         ft = action_payload.get("failure_type")
+#         if ft is not None:
+#             req_body["failure_type"] = ft
 
 #         return req_body
 
 #     except Exception as exc:
-#         print(f"[DEBUG] LLM call failed: {exc}", flush=True)
+#         print(f"[WARN] LLM call failed: {exc}", flush=True)
 #         return None
 
 
 # # ---------------------------------------------------------------------------
-# # Main agent loop
+# # Main agent loop — one scenario
 # # ---------------------------------------------------------------------------
 
-# def run_smart_agent(scenario_id: str, external_call: bool = False) -> float:
+# def run_smart_agent(scenario_id: str) -> float:
 #     """
-#     Runs the LLM agent against one scenario.
-#     Returns the final grader score in [0.0, 1.0].
-
-#     external_call=True suppresses verbose print output for the automated evaluator
-#     but structured [START]/[STEP]/[END] logs are always emitted.
+#     Runs the LLM SRE agent against one scenario.
+#     Emits [START] / [STEP] / [END] structured logs to stdout.
+#     Returns final grader score in [0.0, 1.0].
 #     """
-#     if not external_call:
-#         print(f"\n{'='*50}", flush=True)
-#         print(f"RUNNING SMART AGENT: {scenario_id}", flush=True)
-#         print(f"{'='*50}", flush=True)
-
 #     log_start(task=scenario_id, env=BENCHMARK, model=MODEL_NAME)
 
-#     # --- Reset environment ---
+#     # --- Reset the environment ---
 #     try:
-#         resp = requests.post(
+#         resp  = requests.post(
 #             f"{API_BASE_URL}/reset",
 #             params={"scenario_id": scenario_id},
 #             timeout=30,
 #         )
 #         state = resp.json()
 #     except Exception as exc:
-#         if not external_call:
-#             print(f"[DEBUG] Failed to reset server: {exc}", flush=True)
-#         log_end(success=False, steps=0, score=0.0, rewards=[])
+#         print(f"[ERROR] Failed to reset env for {scenario_id}: {exc}", flush=True)
+#         log_end(task=scenario_id, score=0.0, steps=0, success=False)
 #         return 0.0
 
-#     max_steps    = state.get("steps_remaining", MAX_STEPS)
+#     max_steps    = state.get("steps_remaining", 15)
 #     episode_done = False
-#     rewards: list[float] = []
 #     steps_taken  = 0
 #     score        = 0.0
-#     success      = False
 
 #     for step_num in range(1, max_steps + 1):
 #         if state.get("steps_remaining", 0) <= 0:
 #             break
 
-#         if not external_call:
-#             print(
-#                 f"\n[Step {state.get('step')}] "
-#                 f"Health: {state.get('system_health')} | "
-#                 f"Remaining: {state.get('steps_remaining')}",
-#                 flush=True,
-#             )
-
-#         # --- Get action from LLM or fallback ---
+#         # --- Get action from LLM or fall back to best-guess ---
 #         req_body = _call_llm(state)
 #         if req_body is None:
-#             req_body = _declare_best_guess(state, external_call)
+#             req_body = _best_guess_action(state)
 
-#         if not external_call:
-#             print(f"ACTION: {req_body.get('action')} → {req_body.get('target')}", flush=True)
+#         # Build a readable action label for the [STEP] log
+#         action_label = req_body.get("action", "unknown")
+#         target       = req_body.get("target", "")
+#         if target:
+#             action_label = f"{action_label}:{target}"
 
-#         # --- Execute step on server ---
+#         # --- Execute step on the local env server ---
 #         try:
-#             res = requests.post(
+#             res    = requests.post(
 #                 f"{API_BASE_URL}/step",
 #                 json=req_body,
 #                 timeout=30,
 #             ).json()
 #         except Exception as exc:
-#             if not external_call:
-#                 print(f"[DEBUG] Server step error: {exc}", flush=True)
-#             log_step(step=step_num, action=req_body, reward=0.0, done=False, error=str(exc))
+#             print(f"[ERROR] /step failed: {exc}", flush=True)
+#             log_step(step=step_num, action=action_label, reward=0.0, done=False)
 #             break
 
-#         reward = res.get("reward", 0.0) or 0.0
-#         done   = res.get("done",   False)
-#         error  = res.get("info",   {}).get("message") or None
-
-#         rewards.append(reward)
+#         reward      = float(res.get("reward", 0.0) or 0.0)
+#         done        = bool(res.get("done",   False))
 #         steps_taken = step_num
 
-#         log_step(step=step_num, action=req_body, reward=reward, done=done, error=error)
-
-#         if not external_call and error:
-#             print(f"SERVER MSG: {error}", flush=True)
+#         # Mandatory [STEP] log — emitted for every single step
+#         log_step(step=step_num, action=action_label, reward=reward, done=done)
 
 #         if done:
 #             episode_done = True
 #             break
 
-#         # Update state (fall back to previous good state if observation missing)
 #         state = res.get("observation") or state
 
-#     # --- Force-close episode if budget exhausted without a declaration ---
+#     # --- Force-close if budget exhausted without declare_root_cause ---
 #     if not episode_done:
-#         if not external_call:
-#             print("[DEBUG] Budget exhausted — issuing final best-guess declaration.", flush=True)
-#         fallback = _declare_best_guess(state, external_call)
+#         print("[INFO] Budget exhausted — sending final best-guess declaration.", flush=True)
+#         fallback = _best_guess_action(state)
 #         try:
 #             requests.post(f"{API_BASE_URL}/step", json=fallback, timeout=30)
 #         except Exception as exc:
-#             if not external_call:
-#                 print(f"[DEBUG] Failed to send post-loop declaration: {exc}", flush=True)
+#             print(f"[WARN] Failed to send fallback declaration: {exc}", flush=True)
 
 #     # --- Fetch final grader score ---
 #     try:
 #         score_data = requests.get(f"{API_BASE_URL}/grader", timeout=30).json()
 #         if "total" in score_data:
-#             score   = float(score_data["total"])
-#             success = score >= SUCCESS_SCORE_THRESHOLD
-#             if not external_call:
-#                 print(f"\nFINAL SCORE: {score * 100:.1f}%", flush=True)
-#                 print(json.dumps(score_data.get("breakdown", {}), indent=2), flush=True)
-#         else:
-#             if not external_call:
-#                 print(f"[DEBUG] Grader returned: {score_data}", flush=True)
+#             score = float(score_data["total"])
+#         print(f"[INFO] Grader result: {json.dumps(score_data)}", flush=True)
 #     except Exception as exc:
-#         if not external_call:
-#             print(f"[DEBUG] Failed to fetch final score: {exc}", flush=True)
+#         print(f"[WARN] Failed to fetch grader score: {exc}", flush=True)
 
-#     log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+#     success = score >= SUCCESS_SCORE_THRESHOLD
+#     log_end(task=scenario_id, score=score, steps=steps_taken, success=success)
 #     return score
 
 
@@ -348,15 +309,15 @@
 # # ---------------------------------------------------------------------------
 
 # def run_baseline_suite() -> dict:
-#     """Runs one task from each difficulty bucket and returns a scores dict."""
-#     test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-#     scores: dict = {}
-#     for task in test_tasks:
+#     """Runs easy_e1, medium_m2, hard_h2 and returns their scores."""
+#     results: dict = {}
+#     for task in ["easy_e1", "medium_m2", "hard_h2"]:
 #         try:
-#             scores[task] = run_smart_agent(task, external_call=False)
+#             results[task] = run_smart_agent(task)
 #         except Exception as exc:
-#             scores[task] = {"error": str(exc)}
-#     return scores
+#             print(f"[ERROR] {task} raised: {exc}", flush=True)
+#             results[task] = 0.0
+#     return results
 
 
 # # ---------------------------------------------------------------------------
@@ -365,26 +326,38 @@
 
 # if __name__ == "__main__":
 #     if wait_for_server():
-#         results = run_baseline_suite()
-#         print(json.dumps(results, indent=2), flush=True)
+#         final_results = run_baseline_suite()
+#         print(json.dumps(final_results, indent=2), flush=True)
 #     else:
-#         print("[DEBUG] Server did not become available. Exiting.", flush=True)
+#         print("[ERROR] Env server unavailable. Exiting.", flush=True)
 #         sys.exit(1)
 """
 inference.py — CascadeDebugEnv baseline agent
 ==============================================
-Hackathon checklist (ALL satisfied):
-  [x] Followed sample inference.py strictly
-  [x] API_BASE_URL, MODEL_NAME, HF_TOKEN present in code
-  [x] Defaults ONLY for API_BASE_URL and MODEL_NAME — NOT HF_TOKEN
-  [x] LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")  (optional)
-  [x] All LLM calls use OpenAI client configured via these variables
-  [x] Stdout logs follow [START]/[STEP]/[END] format EXACTLY
 
-LOG FORMAT — plain key=value (NOT json):
-  [START] task=<name> env=<name> model=<name>
-  [STEP] step=<n> action=<str> reward=<float> done=<bool>
-  [END] task=<name> score=<float> steps=<n> success=<bool>
+HACKATHON VALIDATOR REQUIREMENTS (all satisfied):
+  [x] API_BASE_URL  = os.getenv("API_BASE_URL", "<default>")
+  [x] MODEL_NAME    = os.getenv("MODEL_NAME",   "<default>")
+  [x] HF_TOKEN      = os.getenv("HF_TOKEN")          -- NO default
+  [x] LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") -- optional
+  [x] OpenAI client uses base_url=API_BASE_URL and api_key=API_KEY
+      where API_KEY = os.environ["API_KEY"]  (validator injects this)
+  [x] [START] / [STEP] / [END] plain-text stdout logs, flush=True
+  [x] No module-level raise / crash
+  [x] No hardcoded keys or other providers
+
+CRITICAL FIX vs submission #32:
+  The validator injects two env vars:
+    API_BASE_URL  — the LiteLLM proxy URL  (must use as base_url)
+    API_KEY       — the LiteLLM proxy key  (must use as api_key)
+
+  Previous submissions used OPENAI_API_KEY / HF_TOKEN for the client key.
+  The LiteLLM proxy key was NEVER used → validator saw zero API calls through
+  its proxy → "No API calls were made through our LLM proxy".
+
+  Fix: client is always initialised with:
+    api_key  = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or ...
+    base_url = API_BASE_URL   (which IS the proxy URL when validator runs)
 """
 
 import requests
@@ -397,22 +370,41 @@ from openai import OpenAI
 
 # ---------------------------------------------------------------------------
 # Environment configuration
-# RULE: defaults ONLY for API_BASE_URL and MODEL_NAME, NOT HF_TOKEN
+# Validator injects: API_BASE_URL, API_KEY, MODEL_NAME
+# Checklist also requires: HF_TOKEN (no default), LOCAL_IMAGE_NAME (optional)
 # ---------------------------------------------------------------------------
+
 API_BASE_URL     = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
 MODEL_NAME       = os.getenv("MODEL_NAME",   "llama-3.3-70b-versatile")
-HF_TOKEN         = os.getenv("HF_TOKEN")           # NO default — rule from checklist
+HF_TOKEN         = os.getenv("HF_TOKEN")           # NO default (checklist rule)
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, for from_docker_image()
 
-# Key resolution — NEVER raise at module level (validator runs without env vars):
-#   1. OPENAI_API_KEY (explicit override)
-#   2. HF_TOKEN       (hackathon-mandated variable, often holds the Groq key)
-#   3. "placeholder"  (OpenAI client won't crash; LLM calls fail inside try/except)
-_RAW_KEY        = os.getenv("OPENAI_API_KEY") or HF_TOKEN or "placeholder"
-_OPENAI_BASE    = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
+# ---------------------------------------------------------------------------
+# API_KEY resolution — CRITICAL
+#
+# The validator injects "API_KEY" as the LiteLLM proxy key.
+# Resolution order (first non-empty wins):
+#   1. API_KEY       ← what the validator injects (MUST come first)
+#   2. HF_TOKEN      ← hackathon-required fallback
+#   3. OPENAI_API_KEY ← local dev override
+#   4. "placeholder" ← last resort so client never crashes at init
+#
+# The client base_url MUST be API_BASE_URL (the proxy URL).
+# Never use a hardcoded provider URL like api.groq.com when running via validator.
+# ---------------------------------------------------------------------------
 
-# All LLM calls use the OpenAI client configured via these variables
-client = OpenAI(api_key=_RAW_KEY, base_url=_OPENAI_BASE)
+API_KEY = (
+    os.getenv("API_KEY")        # validator-injected LiteLLM proxy key  ← CRITICAL
+    or os.getenv("HF_TOKEN")
+    or os.getenv("OPENAI_API_KEY")
+    or "placeholder"
+)
+
+# All LLM calls go through the OpenAI client configured with the proxy vars
+client = OpenAI(
+    api_key=API_KEY,
+    base_url=API_BASE_URL,   # This IS the LiteLLM proxy when validator runs
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -422,16 +414,11 @@ SUCCESS_SCORE_THRESHOLD = 0.5
 
 # ---------------------------------------------------------------------------
 # Mandatory structured log helpers
-#
-# EXACT format required by the validator:
+# Exact plain-text format required by validator:
 #   [START] task=easy_e1 env=CascadeDebugEnv model=llama-3.3-70b-versatile
 #   [STEP] step=1 action=observe:auth_service reward=0.08 done=False
 #   [END] task=easy_e1 score=0.75 steps=4 success=True
-#
-# Rules:
-#   - stdout only (not stderr)
-#   - flush=True on every print
-#   - plain key=value — NOT JSON
+# Rules: stdout only, flush=True, plain key=value (NOT JSON)
 # ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -455,23 +442,24 @@ def log_end(task: str, score: float, steps: int, success: bool) -> None:
 # ---------------------------------------------------------------------------
 # SRE agent system prompt
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed microservice system.
-You are given a JSON representation of the current system state.
+SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) diagnosing a distributed microservice system.
+You receive a JSON snapshot of the current system state.
 
-Output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
-1. "thought": A brief string explaining your reasoning.
-2. "action": An object with:
+Respond with a single valid JSON object with exactly two keys:
+1. "thought": one sentence explaining your reasoning
+2. "action": object with:
    - "action_type": one of observe | restart | isolate | rollback | drain_connections | reroute_traffic | scale_replica | declare_root_cause
-   - "target": the node id to act on
-   - "failure_type": (ONLY for declare_root_cause) the failure type string
+   - "target": node id (string)
+   - "failure_type": string — ONLY include when action_type is declare_root_cause
 
 STRICT RULES:
-- Cannot see a node's true health until you "observe" it. Observe FIRST.
-- Never take irreversible actions (isolate, restart, rollback) on unobserved nodes.
-- Never observe the same node twice.
-- After observing a critical node, apply a fix action.
-- Final action MUST be "declare_root_cause" with correct node and failure_type.
-- Follow the dependency chain: api_gateway -> auth_service -> user_db, etc.
+- You cannot see a node's true health until you "observe" it. ALWAYS observe first.
+- NEVER take irreversible actions (isolate, restart, rollback) on unobserved nodes.
+- NEVER observe the same node twice.
+- After observing a critical/degraded node, apply a fix action to it.
+- Your FINAL action MUST be declare_root_cause with the correct node and failure_type.
+- Follow dependency chains: api_gateway → auth_service → user_db, etc.
+- Avoid documented trap actions — if something looks too obvious, think twice.
 """
 
 
@@ -480,33 +468,33 @@ STRICT RULES:
 # ---------------------------------------------------------------------------
 
 def wait_for_server(max_retries: int = 60, sleep_seconds: float = 1.0) -> bool:
-    """Poll the environment server until 200 OK or retries exhausted."""
-    print(f"[INFO] Waiting for server at {API_BASE_URL} ...", flush=True)
+    """Poll the local env server until 200 OK or retries are exhausted."""
+    print(f"[INFO] Waiting for env server at {API_BASE_URL} ...", flush=True)
     for attempt in range(max_retries):
         try:
             r = requests.get(f"{API_BASE_URL}/", timeout=10)
             if r.status_code == 200:
-                print(f"[INFO] Server up after {attempt + 1} attempt(s).", flush=True)
+                print(f"[INFO] Server ready after {attempt + 1} attempt(s).", flush=True)
                 return True
         except Exception:
             pass
         time.sleep(sleep_seconds)
-    print("[WARN] Server did not become available in time.", flush=True)
+    print("[WARN] Env server did not become available in time.", flush=True)
     return False
 
 
 def _best_guess_action(state: dict) -> dict:
     """
-    Emergency fallback when LLM errors or budget runs out without declare_root_cause.
-    Picks the most suspicious visible node so the episode always ends with a score.
+    Fallback when LLM errors or budget runs out without declare_root_cause.
+    Picks the most suspicious node so the episode always ends with a score.
 
     Priority (lower = more suspicious):
-      1 - critical + visible symptoms
-      2 - critical (no symptoms)
-      3 - degraded + visible symptoms
-      4 - degraded (no symptoms)
-      5 - any node with symptoms
-      6 - everything else
+      1 — critical status + visible symptoms
+      2 — critical status (no visible symptoms)
+      3 — degraded status + visible symptoms
+      4 — degraded status (no visible symptoms)
+      5 — any node with visible symptoms
+      6 — everything else (healthy / hidden)
     """
     nodes      = state.get("nodes", {})
     candidates = []
@@ -538,7 +526,7 @@ def _best_guess_action(state: dict) -> dict:
     best_syms    = candidates[0][3] if candidates else []
     failure_type = best_syms[0]     if best_syms   else "unknown_failure"
 
-    print(f"[INFO] Best-guess fallback -> {best_node} / {failure_type}", flush=True)
+    print(f"[INFO] Best-guess fallback → {best_node} / {failure_type}", flush=True)
     return {
         "action":       "declare_root_cause",
         "target":       best_node,
@@ -548,12 +536,13 @@ def _best_guess_action(state: dict) -> dict:
 
 def _call_llm(state: dict) -> dict | None:
     """
-    Calls the LLM and returns a parsed req_body dict ready for POST /step.
-    Returns None on any failure — caller should use _best_guess_action().
+    Calls the LLM through the OpenAI client (which points at API_BASE_URL).
+    Returns a parsed req_body dict ready for POST /step, or None on failure.
+    ALL LLM traffic goes through API_BASE_URL — the validator's LiteLLM proxy.
     """
     prompt = (
         f"CURRENT SYSTEM STATE:\n{json.dumps(state, indent=2)}\n\n"
-        "What is your next action?"
+        "What is your next action? Respond with JSON only."
     )
     try:
         response = client.chat.completions.create(
@@ -584,18 +573,18 @@ def _call_llm(state: dict) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Main agent loop
+# Main agent loop — one scenario
 # ---------------------------------------------------------------------------
 
 def run_smart_agent(scenario_id: str) -> float:
     """
-    Runs the LLM agent against one scenario.
+    Runs the LLM SRE agent against one scenario.
     Emits [START] / [STEP] / [END] structured logs to stdout.
     Returns final grader score in [0.0, 1.0].
     """
     log_start(task=scenario_id, env=BENCHMARK, model=MODEL_NAME)
 
-    # Reset environment
+    # --- Reset the environment ---
     try:
         resp  = requests.post(
             f"{API_BASE_URL}/reset",
@@ -617,18 +606,18 @@ def run_smart_agent(scenario_id: str) -> float:
         if state.get("steps_remaining", 0) <= 0:
             break
 
-        # Get action from LLM or fall back
+        # --- Get action from LLM or fall back to best-guess ---
         req_body = _call_llm(state)
         if req_body is None:
             req_body = _best_guess_action(state)
 
-        # Build a readable action label for the log
+        # Build a readable action label for the [STEP] log
         action_label = req_body.get("action", "unknown")
         target       = req_body.get("target", "")
         if target:
             action_label = f"{action_label}:{target}"
 
-        # Execute step on the env server
+        # --- Execute step on the local env server ---
         try:
             res    = requests.post(
                 f"{API_BASE_URL}/step",
@@ -636,7 +625,7 @@ def run_smart_agent(scenario_id: str) -> float:
                 timeout=30,
             ).json()
         except Exception as exc:
-            print(f"[ERROR] /step request failed: {exc}", flush=True)
+            print(f"[ERROR] /step failed: {exc}", flush=True)
             log_step(step=step_num, action=action_label, reward=0.0, done=False)
             break
 
@@ -644,7 +633,7 @@ def run_smart_agent(scenario_id: str) -> float:
         done        = bool(res.get("done",   False))
         steps_taken = step_num
 
-        # Mandatory [STEP] log — every step
+        # Mandatory [STEP] log — emitted for every single step
         log_step(step=step_num, action=action_label, reward=reward, done=done)
 
         if done:
@@ -653,7 +642,7 @@ def run_smart_agent(scenario_id: str) -> float:
 
         state = res.get("observation") or state
 
-    # Force-close if budget exhausted without declare_root_cause
+    # --- Force-close if budget exhausted without declare_root_cause ---
     if not episode_done:
         print("[INFO] Budget exhausted — sending final best-guess declaration.", flush=True)
         fallback = _best_guess_action(state)
@@ -662,12 +651,12 @@ def run_smart_agent(scenario_id: str) -> float:
         except Exception as exc:
             print(f"[WARN] Failed to send fallback declaration: {exc}", flush=True)
 
-    # Fetch final grader score
+    # --- Fetch final grader score ---
     try:
         score_data = requests.get(f"{API_BASE_URL}/grader", timeout=30).json()
         if "total" in score_data:
             score = float(score_data["total"])
-        print(f"[INFO] Grader: {json.dumps(score_data)}", flush=True)
+        print(f"[INFO] Grader result: {json.dumps(score_data)}", flush=True)
     except Exception as exc:
         print(f"[WARN] Failed to fetch grader score: {exc}", flush=True)
 
@@ -677,17 +666,17 @@ def run_smart_agent(scenario_id: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Baseline suite — one per difficulty tier
+# Baseline suite — one scenario per difficulty tier
 # ---------------------------------------------------------------------------
 
 def run_baseline_suite() -> dict:
-    """Runs easy_e1, medium_m2, hard_h2 and returns scores."""
+    """Runs easy_e1, medium_m2, hard_h2 and returns their scores."""
     results: dict = {}
     for task in ["easy_e1", "medium_m2", "hard_h2"]:
         try:
             results[task] = run_smart_agent(task)
         except Exception as exc:
-            print(f"[ERROR] {task}: {exc}", flush=True)
+            print(f"[ERROR] {task} raised: {exc}", flush=True)
             results[task] = 0.0
     return results
 
@@ -701,5 +690,5 @@ if __name__ == "__main__":
         final_results = run_baseline_suite()
         print(json.dumps(final_results, indent=2), flush=True)
     else:
-        print("[ERROR] Server unavailable. Exiting.", flush=True)
+        print("[ERROR] Env server unavailable. Exiting.", flush=True)
         sys.exit(1)
