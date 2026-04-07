@@ -1,11 +1,12 @@
 ===== ./app.py =====
 
+
 # from fastapi import FastAPI, HTTPException
-# from fastapi.middleware.cors import CORSMiddleware
 # from typing import Optional
 # import json
 # import os
 # import sys
+# import threading
 
 # ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 # if ROOT_DIR not in sys.path:
@@ -16,72 +17,58 @@
 
 # app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
 
-# # ✅ CORS FIX (IMPORTANT)
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],  # dev ch sab allow
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+# # ---------------------------------------------------------------------------
+# # Scenario loading — raise at startup if broken, so container exits cleanly
+# # ---------------------------------------------------------------------------
 
-# # ---------------------------------------------------------------------------
-# # Scenario loading
-# # ---------------------------------------------------------------------------
 # def load_scenarios() -> dict:
-#     scenarios = {}
-
+#     scenarios: dict = {}
 #     preferred_dirs = [
 #         os.path.join(ROOT_DIR, "scenarios"),
 #         "/app/scenarios",
 #     ]
-
-#     scenario_dir = None
-#     for d in preferred_dirs:
-#         if os.path.isdir(d):
-#             scenario_dir = d
-#             break
+#     scenario_dir = next((d for d in preferred_dirs if os.path.isdir(d)), None)
 
 #     if scenario_dir is None:
-#         raise FileNotFoundError(
-#             f"Could not find scenarios directory. Tried: {preferred_dirs}"
-#         )
+#         raise FileNotFoundError(f"No scenarios dir found. Tried: {preferred_dirs}")
 
-#     for fname in os.listdir(scenario_dir):
-#         if fname.endswith(".json"):
-#             fpath = os.path.join(scenario_dir, fname)
-#             with open(fpath, "r", encoding="utf-8") as f:
-#                 data = json.load(f)
-
-#             scenario_id = data.get("scenario_id")
-#             if not scenario_id:
-#                 raise ValueError(f"Missing scenario_id in {fname}")
-
-#             scenarios[scenario_id] = data
+#     for fname in sorted(os.listdir(scenario_dir)):
+#         if not fname.endswith(".json"):
+#             continue
+#         fpath = os.path.join(scenario_dir, fname)
+#         with open(fpath, "r", encoding="utf-8") as f:
+#             data = json.load(f)
+#         sid = data.get("scenario_id")
+#         if not sid:
+#             raise ValueError(f"Missing 'scenario_id' in {fname}")
+#         scenarios[sid] = data
 
 #     if not scenarios:
-#         raise ValueError(f"No scenario JSON files found in {scenario_dir}")
-
+#         raise ValueError(f"No scenario JSON files found in: {scenario_dir}")
 #     return scenarios
 
 
-# SCENARIOS = load_scenarios()
-# active_env = None
+# SCENARIOS: dict = load_scenarios()
+
+# _env_lock:  threading.Lock                        = threading.Lock()
+# active_env: Optional[CascadeDebugEnvironment]     = None
 
 
 # # ---------------------------------------------------------------------------
-# # Reward shaping
+# # Intermediate reward shaping
 # # ---------------------------------------------------------------------------
+
 # def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) -> float:
+#     """
+#     Shaped reward signal computed BEFORE executing the action.
+#     Terminal step reward is replaced by the final grader total.
+#     """
 #     reward = 0.0
 
 #     if action.action == "observe":
 #         if action.target in env.state.nodes:
 #             node = env.state.nodes[action.target]
-#             if not node["observable"]:
-#                 reward += 0.08
-#             else:
-#                 reward -= 0.02
+#             reward += 0.08 if not node.get("observable", True) else -0.02
 
 #     elif action.action in {"restart", "rollback", "drain_connections", "reroute_traffic"}:
 #         reward += 0.05
@@ -93,11 +80,12 @@
 #         reward += 0.03
 
 #     elif action.action == "declare_root_cause":
-#         reward -= 0.05
+#         reward -= 0.05  # mild penalty to discourage premature declarations
 
+#     # Penalise documented trap actions
 #     try:
-#         ground_truth = env.scenario_dict.get("ground_truth", {})
-#         for trap in ground_truth.get("trap_actions", []):
+#         gt = env.scenario_dict.get("ground_truth", {})
+#         for trap in gt.get("trap_actions", []):
 #             if (
 #                 isinstance(trap, dict)
 #                 and trap.get("action") == action.action
@@ -122,7 +110,7 @@
 #         "cwd": os.getcwd(),
 #         "base_dir": ROOT_DIR,
 #         "scenario_count": len(SCENARIOS),
-#         "loaded_scenarios": list(SCENARIOS.keys()),
+#         "loaded_scenarios": sorted(SCENARIOS.keys()),
 #     }
 
 
@@ -131,7 +119,7 @@
 #     if not SCENARIOS:
 #         raise HTTPException(status_code=500, detail="No scenarios loaded.")
 #     return {
-#         "tasks": list(SCENARIOS.keys()),
+#         "tasks": sorted(SCENARIOS.keys()),
 #         "action_schema": Action.model_json_schema(),
 #     }
 
@@ -139,412 +127,125 @@
 # @app.get("/schema")
 # def get_schema():
 #     return {
-#         "action_schema": Action.model_json_schema(),
+#         "action_schema":      Action.model_json_schema(),
 #         "observation_schema": Observation.model_json_schema(),
 #     }
 
 
 # @app.post("/reset", response_model=Observation)
 # def reset(scenario_id: Optional[str] = None):
+#     """
+#     Initialises the environment.
+#     Bare POST /reset (no query param) defaults to easy_e1 — never 422s the validator.
+#     """
 #     global active_env
-
 #     if not SCENARIOS:
 #         raise HTTPException(status_code=500, detail="No scenarios loaded.")
-
 #     if not scenario_id or scenario_id not in SCENARIOS:
 #         scenario_id = "easy_e1"
-
 #     try:
-#         active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
-#         return active_env.get_observation()
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to initialize scenario '{scenario_id}': {str(e)}"
-#         )
+#         with _env_lock:
+#             active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
+#             return active_env.get_observation()
+#     except Exception as exc:
+#         raise HTTPException(status_code=500, detail=f"Failed to init '{scenario_id}': {exc}")
 
 
 # @app.get("/state", response_model=Observation)
 # def get_state():
 #     global active_env
-
-#     if active_env is None:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="No active episode. Call /reset first."
-#         )
-#     try:
-#         return active_env.get_observation()
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to fetch environment state: {str(e)}"
-#         )
+#     with _env_lock:
+#         if active_env is None:
+#             raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+#         try:
+#             return active_env.get_observation()
+#         except Exception as exc:
+#             raise HTTPException(status_code=500, detail=f"State error: {exc}")
 
 
 # @app.post("/step", response_model=StepResponse)
 # def step(req: Action):
+#     """
+#     Executes one action.
+#     Intermediate reward on non-terminal steps; final grader total on terminal steps.
+#     """
 #     global active_env
+#     with _env_lock:
+#         if active_env is None:
+#             raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+#         try:
+#             reward = compute_intermediate_reward(active_env, req)
+#             result = active_env.step(req.action, req.target, req.failure_type)
 
-#     if active_env is None:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="No active episode. Call /reset first."
-#         )
+#             if result.get("done"):
+#                 try:
+#                     score_data = active_env.get_score()
+#                     if isinstance(score_data, dict):
+#                         reward = float(score_data.get("total", 0.0))
+#                 except Exception:
+#                     reward = 0.0
 
-#     try:
-#         reward = compute_intermediate_reward(active_env, req)
-
-#         result = active_env.step(req.action, req.target, req.failure_type)
-
-#         if result.get("done"):
-#             try:
-#                 score_data = active_env.get_score()
-#                 if isinstance(score_data, dict):
-#                     reward = float(score_data.get("total", 0.0))
-#             except Exception:
-#                 reward = 0.0
-
-#         return {
-#             "observation": result.get("observation"),
-#             "reward": reward,
-#             "done": result.get("done", False),
-#             "info": {
-#                 "message": result.get("message", "")
-#             },
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Step execution failed: {str(e)}"
-#         )
+#             return {
+#                 "observation": result.get("observation"),
+#                 "reward":      reward,
+#                 "done":        result.get("done", False),
+#                 "info":        {"message": result.get("message", "")},
+#             }
+#         except Exception as exc:
+#             raise HTTPException(status_code=500, detail=f"Step failed: {exc}")
 
 
 # @app.get("/grader")
 # def get_score():
+#     """Returns the final score breakdown. Only valid after done=True."""
 #     global active_env
-
-#     if active_env is None:
-#         raise HTTPException(status_code=400, detail="No active episode.")
-
-#     try:
-#         if not active_env.state.done:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail="Episode not complete."
-#             )
-#         return active_env.get_score()
-
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to compute grade: {str(e)}"
-#         )
+#     with _env_lock:
+#         if active_env is None:
+#             raise HTTPException(status_code=400, detail="No active episode.")
+#         try:
+#             if not active_env.state.done:
+#                 raise HTTPException(
+#                     status_code=400,
+#                     detail="Episode not complete. Declare root cause or exhaust step budget.",
+#                 )
+#             return active_env.get_score()
+#         except HTTPException:
+#             raise
+#         except Exception as exc:
+#             raise HTTPException(status_code=500, detail=f"Grader error: {exc}")
 
 
 # @app.get("/baseline")
 # def run_baseline():
+#     """Runs baseline LLM agent on easy/medium/hard and returns scores."""
 #     try:
 #         from inference import run_smart_agent
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to import baseline agent: {str(e)}"
-#         )
+#     except Exception as exc:
+#         raise HTTPException(status_code=500, detail=f"Import inference.py failed: {exc}")
 
-#     test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-#     scores = {}
-
-#     for task in test_tasks:
+#     scores: dict = {}
+#     for task in ["easy_e1", "medium_m2", "hard_h2"]:
 #         try:
-#             scores[task] = run_smart_agent(task, external_call=True)
-#         except Exception as e:
-#             scores[task] = {"error": str(e)}
-
+#             scores[task] = run_smart_agent(task)
+#         except Exception as exc:
+#             scores[task] = {"error": str(exc)}
 #     return {"baseline_scores": scores}
-# from fastapi import FastAPI, HTTPException
-# from fastapi.middleware.cors import CORSMiddleware
-# from fastapi.responses import RedirectResponse  # ✅ ADDED
-# from typing import Optional
-# import json
-# import os
-# import sys
+"""
+app.py — root-level FastAPI server (Dockerfile entry point)
 
-# ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-# if ROOT_DIR not in sys.path:
-#     sys.path.append(ROOT_DIR)
+This is the OpenEnv-compatible HTTP server for CascadeDebugEnv.
+The validator pings this server at the HF Space URL.
+inference.py talks to THIS server via API_BASE_URL for env calls (reset/step/grader).
+LLM calls in inference.py go to API_BASE_URL which the validator redirects
+through its LiteLLM proxy.
+"""
 
-# from models import Action, StepResponse, Observation
-# from server.cascade_debug_env_environment import CascadeDebugEnvironment
-
-# app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
-
-# # ✅ CORS FIX (IMPORTANT)
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# # ---------------------------------------------------------------------------
-# # Scenario loading
-# # ---------------------------------------------------------------------------
-# def load_scenarios() -> dict:
-#     scenarios = {}
-
-#     preferred_dirs = [
-#         os.path.join(ROOT_DIR, "scenarios"),
-#         "/app/scenarios",
-#     ]
-
-#     scenario_dir = None
-#     for d in preferred_dirs:
-#         if os.path.isdir(d):
-#             scenario_dir = d
-#             break
-
-#     if scenario_dir is None:
-#         raise FileNotFoundError(
-#             f"Could not find scenarios directory. Tried: {preferred_dirs}"
-#         )
-
-#     for fname in os.listdir(scenario_dir):
-#         if fname.endswith(".json"):
-#             fpath = os.path.join(scenario_dir, fname)
-#             with open(fpath, "r", encoding="utf-8") as f:
-#                 data = json.load(f)
-
-#             scenario_id = data.get("scenario_id")
-#             if not scenario_id:
-#                 raise ValueError(f"Missing scenario_id in {fname}")
-
-#             scenarios[scenario_id] = data
-
-#     if not scenarios:
-#         raise ValueError(f"No scenario JSON files found in {scenario_dir}")
-
-#     return scenarios
-
-
-# SCENARIOS = load_scenarios()
-# active_env = None
-
-
-# # ---------------------------------------------------------------------------
-# # Reward shaping
-# # ---------------------------------------------------------------------------
-# def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) -> float:
-#     reward = 0.0
-
-#     if action.action == "observe":
-#         if action.target in env.state.nodes:
-#             node = env.state.nodes[action.target]
-#             if not node["observable"]:
-#                 reward += 0.08
-#             else:
-#                 reward -= 0.02
-
-#     elif action.action in {"restart", "rollback", "drain_connections", "reroute_traffic"}:
-#         reward += 0.05
-
-#     elif action.action == "scale_replica":
-#         reward += 0.02
-
-#     elif action.action == "isolate":
-#         reward += 0.03
-
-#     elif action.action == "declare_root_cause":
-#         reward -= 0.05
-
-#     try:
-#         ground_truth = env.scenario_dict.get("ground_truth", {})
-#         for trap in ground_truth.get("trap_actions", []):
-#             if (
-#                 isinstance(trap, dict)
-#                 and trap.get("action") == action.action
-#                 and trap.get("target") == action.target
-#             ):
-#                 reward -= 0.15
-#                 break
-#     except Exception:
-#         pass
-
-#     return round(reward, 4)
-
-
-# # ---------------------------------------------------------------------------
-# # Endpoints
-# # ---------------------------------------------------------------------------
-
-# # 🔥 CHANGED: root now redirects to frontend
-# @app.get("/")
-# def root():
-#     return RedirectResponse(url="http://localhost:3000")
-
-
-# @app.get("/health")
-# def health_check():
-#     return {
-#         "status": "ok",
-#         "cwd": os.getcwd(),
-#         "base_dir": ROOT_DIR,
-#         "scenario_count": len(SCENARIOS),
-#         "loaded_scenarios": list(SCENARIOS.keys()),
-#     }
-
-
-# @app.get("/tasks")
-# def get_tasks():
-#     if not SCENARIOS:
-#         raise HTTPException(status_code=500, detail="No scenarios loaded.")
-#     return {
-#         "tasks": list(SCENARIOS.keys()),
-#         "action_schema": Action.model_json_schema(),
-#     }
-
-
-# @app.get("/schema")
-# def get_schema():
-#     return {
-#         "action_schema": Action.model_json_schema(),
-#         "observation_schema": Observation.model_json_schema(),
-#     }
-
-
-# @app.post("/reset", response_model=Observation)
-# def reset(scenario_id: Optional[str] = None):
-#     global active_env
-
-#     if not SCENARIOS:
-#         raise HTTPException(status_code=500, detail="No scenarios loaded.")
-
-#     if not scenario_id or scenario_id not in SCENARIOS:
-#         scenario_id = "easy_e1"
-
-#     try:
-#         active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
-#         return active_env.get_observation()
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to initialize scenario '{scenario_id}': {str(e)}"
-#         )
-
-
-# @app.get("/state", response_model=Observation)
-# def get_state():
-#     global active_env
-
-#     if active_env is None:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="No active episode. Call /reset first."
-#         )
-#     try:
-#         return active_env.get_observation()
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to fetch environment state: {str(e)}"
-#         )
-
-
-# @app.post("/step", response_model=StepResponse)
-# def step(req: Action):
-#     global active_env
-
-#     if active_env is None:
-#         raise HTTPException(
-#             status_code=400,
-#             detail="No active episode. Call /reset first."
-#         )
-
-#     try:
-#         reward = compute_intermediate_reward(active_env, req)
-
-#         result = active_env.step(req.action, req.target, req.failure_type)
-
-#         if result.get("done"):
-#             try:
-#                 score_data = active_env.get_score()
-#                 if isinstance(score_data, dict):
-#                     reward = float(score_data.get("total", 0.0))
-#             except Exception:
-#                 reward = 0.0
-
-#         return {
-#             "observation": result.get("observation"),
-#             "reward": reward,
-#             "done": result.get("done", False),
-#             "info": {
-#                 "message": result.get("message", "")
-#             },
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Step execution failed: {str(e)}"
-#         )
-
-
-# @app.get("/grader")
-# def get_score():
-#     global active_env
-
-#     if active_env is None:
-#         raise HTTPException(status_code=400, detail="No active episode.")
-
-#     try:
-#         if not active_env.state.done:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail="Episode not complete."
-#             )
-#         return active_env.get_score()
-
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to compute grade: {str(e)}"
-#         )
-
-
-# @app.get("/baseline")
-# def run_baseline():
-#     try:
-#         from inference import run_smart_agent
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Failed to import baseline agent: {str(e)}"
-#         )
-
-#     test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-#     scores = {}
-
-#     for task in test_tasks:
-#         try:
-#             scores[task] = run_smart_agent(task, external_call=True)
-#         except Exception as e:
-#             scores[task] = {"error": str(e)}
-
-#     return {"baseline_scores": scores}
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse  # ✅ ADDED
 from typing import Optional
 import json
 import os
 import sys
+import threading
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 if ROOT_DIR not in sys.path:
@@ -555,72 +256,58 @@ from server.cascade_debug_env_environment import CascadeDebugEnvironment
 
 app = FastAPI(title="CascadeDebugEnv OpenEnv Server")
 
-# ✅ CORS FIX (IMPORTANT)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ---------------------------------------------------------------------------
+# Scenario loading — raise at startup if broken, so container exits cleanly
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Scenario loading
-# ---------------------------------------------------------------------------
 def load_scenarios() -> dict:
-    scenarios = {}
-
+    scenarios: dict = {}
     preferred_dirs = [
         os.path.join(ROOT_DIR, "scenarios"),
         "/app/scenarios",
     ]
-
-    scenario_dir = None
-    for d in preferred_dirs:
-        if os.path.isdir(d):
-            scenario_dir = d
-            break
+    scenario_dir = next((d for d in preferred_dirs if os.path.isdir(d)), None)
 
     if scenario_dir is None:
-        raise FileNotFoundError(
-            f"Could not find scenarios directory. Tried: {preferred_dirs}"
-        )
+        raise FileNotFoundError(f"No scenarios dir found. Tried: {preferred_dirs}")
 
-    for fname in os.listdir(scenario_dir):
-        if fname.endswith(".json"):
-            fpath = os.path.join(scenario_dir, fname)
-            with open(fpath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            scenario_id = data.get("scenario_id")
-            if not scenario_id:
-                raise ValueError(f"Missing scenario_id in {fname}")
-
-            scenarios[scenario_id] = data
+    for fname in sorted(os.listdir(scenario_dir)):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(scenario_dir, fname)
+        with open(fpath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        sid = data.get("scenario_id")
+        if not sid:
+            raise ValueError(f"Missing 'scenario_id' in {fname}")
+        scenarios[sid] = data
 
     if not scenarios:
-        raise ValueError(f"No scenario JSON files found in {scenario_dir}")
-
+        raise ValueError(f"No scenario JSON files found in: {scenario_dir}")
     return scenarios
 
 
-SCENARIOS = load_scenarios()
-active_env = None
+SCENARIOS: dict = load_scenarios()
+
+_env_lock:  threading.Lock                        = threading.Lock()
+active_env: Optional[CascadeDebugEnvironment]     = None
 
 
 # ---------------------------------------------------------------------------
-# Reward shaping
+# Intermediate reward shaping
 # ---------------------------------------------------------------------------
+
 def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) -> float:
+    """
+    Shaped reward signal computed BEFORE executing the action.
+    Terminal step reward is replaced by the final grader total.
+    """
     reward = 0.0
 
     if action.action == "observe":
         if action.target in env.state.nodes:
             node = env.state.nodes[action.target]
-            if not node["observable"]:
-                reward += 0.08
-            else:
-                reward -= 0.02
+            reward += 0.08 if not node.get("observable", True) else -0.02
 
     elif action.action in {"restart", "rollback", "drain_connections", "reroute_traffic"}:
         reward += 0.05
@@ -632,11 +319,12 @@ def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) ->
         reward += 0.03
 
     elif action.action == "declare_root_cause":
-        reward -= 0.05
+        reward -= 0.05  # mild penalty to discourage premature declarations
 
+    # Penalise documented trap actions
     try:
-        ground_truth = env.scenario_dict.get("ground_truth", {})
-        for trap in ground_truth.get("trap_actions", []):
+        gt = env.scenario_dict.get("ground_truth", {})
+        for trap in gt.get("trap_actions", []):
             if (
                 isinstance(trap, dict)
                 and trap.get("action") == action.action
@@ -651,30 +339,17 @@ def compute_intermediate_reward(env: CascadeDebugEnvironment, action: Action) ->
 
 
 # ---------------------------------------------------------------------------
-# 🔥 FRONTEND SERVE (FIXED PROPERLY)
+# Endpoints
 # ---------------------------------------------------------------------------
 
-# Serve main UI on "/"
 @app.get("/")
-def serve_frontend():
-    return FileResponse("chaos-frontend/out/index.html")
-
-# Serve Next.js static assets
-app.mount("/_next", StaticFiles(directory="chaos-frontend/out/_next"), name="next")
-
-
-# ---------------------------------------------------------------------------
-# Endpoints (UNCHANGED)
-# ---------------------------------------------------------------------------
-
-@app.get("/health")
 def health_check():
     return {
         "status": "ok",
         "cwd": os.getcwd(),
         "base_dir": ROOT_DIR,
         "scenario_count": len(SCENARIOS),
-        "loaded_scenarios": list(SCENARIOS.keys()),
+        "loaded_scenarios": sorted(SCENARIOS.keys()),
     }
 
 
@@ -683,7 +358,7 @@ def get_tasks():
     if not SCENARIOS:
         raise HTTPException(status_code=500, detail="No scenarios loaded.")
     return {
-        "tasks": list(SCENARIOS.keys()),
+        "tasks": sorted(SCENARIOS.keys()),
         "action_schema": Action.model_json_schema(),
     }
 
@@ -691,132 +366,110 @@ def get_tasks():
 @app.get("/schema")
 def get_schema():
     return {
-        "action_schema": Action.model_json_schema(),
+        "action_schema":      Action.model_json_schema(),
         "observation_schema": Observation.model_json_schema(),
     }
 
 
 @app.post("/reset", response_model=Observation)
 def reset(scenario_id: Optional[str] = None):
+    """
+    Initialises the environment.
+    Bare POST /reset (no query param) defaults to easy_e1 — never 422s the validator.
+    """
     global active_env
-
     if not SCENARIOS:
         raise HTTPException(status_code=500, detail="No scenarios loaded.")
-
     if not scenario_id or scenario_id not in SCENARIOS:
         scenario_id = "easy_e1"
-
     try:
-        active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
-        return active_env.get_observation()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to initialize scenario '{scenario_id}': {str(e)}"
-        )
+        with _env_lock:
+            active_env = CascadeDebugEnvironment(SCENARIOS[scenario_id])
+            return active_env.get_observation()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to init '{scenario_id}': {exc}")
 
 
 @app.get("/state", response_model=Observation)
 def get_state():
     global active_env
-
-    if active_env is None:
-        raise HTTPException(
-            status_code=400,
-            detail="No active episode. Call /reset first."
-        )
-    try:
-        return active_env.get_observation()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch environment state: {str(e)}"
-        )
+    with _env_lock:
+        if active_env is None:
+            raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+        try:
+            return active_env.get_observation()
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"State error: {exc}")
 
 
 @app.post("/step", response_model=StepResponse)
 def step(req: Action):
+    """
+    Executes one action.
+    Intermediate reward on non-terminal steps; final grader total on terminal steps.
+    """
     global active_env
+    with _env_lock:
+        if active_env is None:
+            raise HTTPException(status_code=400, detail="No active episode. Call /reset first.")
+        try:
+            reward = compute_intermediate_reward(active_env, req)
+            result = active_env.step(req.action, req.target, req.failure_type)
 
-    if active_env is None:
-        raise HTTPException(
-            status_code=400,
-            detail="No active episode. Call /reset first."
-        )
+            if result.get("done"):
+                try:
+                    score_data = active_env.get_score()
+                    if isinstance(score_data, dict):
+                        reward = float(score_data.get("total", 0.0))
+                except Exception:
+                    reward = 0.0
 
-    try:
-        reward = compute_intermediate_reward(active_env, req)
-
-        result = active_env.step(req.action, req.target, req.failure_type)
-
-        if result.get("done"):
-            try:
-                score_data = active_env.get_score()
-                if isinstance(score_data, dict):
-                    reward = float(score_data.get("total", 0.0))
-            except Exception:
-                reward = 0.0
-
-        return {
-            "observation": result.get("observation"),
-            "reward": reward,
-            "done": result.get("done", False),
-            "info": {
-                "message": result.get("message", "")
-            },
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Step execution failed: {str(e)}"
-        )
+            return {
+                "observation": result.get("observation"),
+                "reward":      reward,
+                "done":        result.get("done", False),
+                "info":        {"message": result.get("message", "")},
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Step failed: {exc}")
 
 
 @app.get("/grader")
 def get_score():
+    """Returns the final score breakdown. Only valid after done=True."""
     global active_env
-
-    if active_env is None:
-        raise HTTPException(status_code=400, detail="No active episode.")
-
-    try:
-        if not active_env.state.done:
-            raise HTTPException(
-                status_code=400,
-                detail="Episode not complete."
-            )
-        return active_env.get_score()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to compute grade: {str(e)}"
-        )
+    with _env_lock:
+        if active_env is None:
+            raise HTTPException(status_code=400, detail="No active episode.")
+        try:
+            if not active_env.state.done:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Episode not complete. Declare root cause or exhaust step budget.",
+                )
+            return active_env.get_score()
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Grader error: {exc}")
 
 
 @app.get("/baseline")
 def run_baseline():
+    """Runs baseline LLM agent on easy/medium/hard and returns scores."""
     try:
         from inference import run_smart_agent
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to import baseline agent: {str(e)}"
-        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Import inference.py failed: {exc}")
 
-    test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-    scores = {}
-
-    for task in test_tasks:
+    scores: dict = {}
+    for task in ["easy_e1", "medium_m2", "hard_h2"]:
         try:
-            scores[task] = run_smart_agent(task, external_call=True)
-        except Exception as e:
-            scores[task] = {"error": str(e)}
-
+            scores[task] = run_smart_agent(task)
+        except Exception as exc:
+            scores[task] = {"error": str(exc)}
     return {"baseline_scores": scores}
+
 ===== ./chaos-frontend/lib/api.ts =====
 const API_URL = ""; // HF te same domain use hovega
 
@@ -3104,599 +2757,497 @@ if __name__ == "__main__":
         run_smart_agent("medium_m2")
 
 ===== ./inference.py =====
-# # inference.py
+
+# """
+# inference.py — CascadeDebugEnv baseline agent
+# ==============================================
+
+# HACKATHON VALIDATOR REQUIREMENTS (all satisfied):
+#   [x] API_BASE_URL  = os.getenv("API_BASE_URL", "<default>")
+#   [x] MODEL_NAME    = os.getenv("MODEL_NAME",   "<default>")
+#   [x] HF_TOKEN      = os.getenv("HF_TOKEN")          -- NO default
+#   [x] LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") -- optional
+#   [x] OpenAI client uses base_url=API_BASE_URL and api_key=API_KEY
+#       where API_KEY = os.environ["API_KEY"]  (validator injects this)
+#   [x] [START] / [STEP] / [END] plain-text stdout logs, flush=True
+#   [x] No module-level raise / crash
+#   [x] No hardcoded keys or other providers
+
+# CRITICAL FIX vs submission #32:
+#   The validator injects two env vars:
+#     API_BASE_URL  — the LiteLLM proxy URL  (must use as base_url)
+#     API_KEY       — the LiteLLM proxy key  (must use as api_key)
+
+#   Previous submissions used OPENAI_API_KEY / HF_TOKEN for the client key.
+#   The LiteLLM proxy key was NEVER used → validator saw zero API calls through
+#   its proxy → "No API calls were made through our LLM proxy".
+
+#   Fix: client is always initialised with:
+#     api_key  = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN") or ...
+#     base_url = API_BASE_URL   (which IS the proxy URL when validator runs)
+# """
+
 # import requests
 # import time
 # import json
 # import os
+# import sys
+
 # from openai import OpenAI
 
-# # -----------------------------
-# # Environment Configuration
-# # -----------------------------
-# API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
-# MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
+# # ---------------------------------------------------------------------------
+# # Environment configuration
+# # Validator injects: API_BASE_URL, API_KEY, MODEL_NAME
+# # Checklist also requires: HF_TOKEN (no default), LOCAL_IMAGE_NAME (optional)
+# # ---------------------------------------------------------------------------
 
-# # BUG FIX: Raise early with a clear message if the key is missing.
-# # Previously this just assigned None to os.environ which raises a TypeError
-# # somewhere deep in the OpenAI client, making the root cause hard to find.
-# if not OPENAI_API_KEY:
-#     raise ValueError(
-#         "Missing OPENAI_API_KEY environment variable. "
-#         "Set it via: export OPENAI_API_KEY=gsk_..."
+# API_BASE_URL     = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
+# MODEL_NAME       = os.getenv("MODEL_NAME",   "llama-3.3-70b-versatile")
+# HF_TOKEN         = os.getenv("HF_TOKEN")           # NO default (checklist rule)
+# LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")   # optional, for from_docker_image()
+
+# # ---------------------------------------------------------------------------
+# # API_KEY resolution — CRITICAL
+# #
+# # The validator injects "API_KEY" as the LiteLLM proxy key.
+# # Resolution order (first non-empty wins):
+# #   1. API_KEY       ← what the validator injects (MUST come first)
+# #   2. HF_TOKEN      ← hackathon-required fallback
+# #   3. OPENAI_API_KEY ← local dev override
+# #   4. "placeholder" ← last resort so client never crashes at init
+# #
+# # The client base_url MUST be API_BASE_URL (the proxy URL).
+# # Never use a hardcoded provider URL like api.groq.com when running via validator.
+# # ---------------------------------------------------------------------------
+
+# API_KEY = (
+#     os.getenv("API_KEY")        # validator-injected LiteLLM proxy key  ← CRITICAL
+#     or os.getenv("HF_TOKEN")
+#     or os.getenv("OPENAI_API_KEY")
+#     or "placeholder"
+# )
+
+# # All LLM calls go through the OpenAI client configured with the proxy vars
+# client = OpenAI(
+#     api_key=API_KEY,
+#     base_url=API_BASE_URL,   # This IS the LiteLLM proxy when validator runs
+# )
+
+# # ---------------------------------------------------------------------------
+# # Constants
+# # ---------------------------------------------------------------------------
+# BENCHMARK               = "CascadeDebugEnv"
+# SUCCESS_SCORE_THRESHOLD = 0.5
+
+# # ---------------------------------------------------------------------------
+# # Mandatory structured log helpers
+# # Exact plain-text format required by validator:
+# #   [START] task=easy_e1 env=CascadeDebugEnv model=llama-3.3-70b-versatile
+# #   [STEP] step=1 action=observe:auth_service reward=0.08 done=False
+# #   [END] task=easy_e1 score=0.75 steps=4 success=True
+# # Rules: stdout only, flush=True, plain key=value (NOT JSON)
+# # ---------------------------------------------------------------------------
+
+# def log_start(task: str, env: str, model: str) -> None:
+#     print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+# def log_step(step: int, action: str, reward: float, done: bool) -> None:
+#     print(
+#         f"[STEP] step={step} action={action} reward={round(reward, 4)} done={done}",
+#         flush=True,
 #     )
 
-# client = OpenAI(
-#     api_key=OPENAI_API_KEY,
-#     base_url=OPENAI_BASE_URL
-# )
 
-# SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed system.
-# You will be given a JSON representation of the system state.
-# You must output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
-# 1. "thought": A brief string explaining your reasoning based on dependencies and symptoms.
-# 2. "action": An object containing "action_type", "target", and optionally "failure_type".
+# def log_end(task: str, score: float, steps: int, success: bool) -> None:
+#     print(
+#         f"[END] task={task} score={round(score, 4)} steps={steps} success={success}",
+#         flush=True,
+#     )
 
-# Available actions: observe, restart, isolate, rollback, drain_connections, reroute_traffic, scale_replica, declare_root_cause.
 
-# RULES:
-# - You cannot see a node's true health until you 'observe' it. DO THIS FIRST.
-# - Do NOT take irreversible actions (isolate, restart, rollback) on a node you haven't observed.
-# - DO NOT observe the same node multiple times.
-# - Once you observe the suspicious upstream node, you MUST execute a fix (like drain_connections, rollback, or restart).
-# - If you find the issue and fix it, the final action must be 'declare_root_cause' with the node and failure_type.
+# # ---------------------------------------------------------------------------
+# # SRE agent system prompt
+# # ---------------------------------------------------------------------------
+# SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) diagnosing a distributed microservice system.
+# You receive a JSON snapshot of the current system state.
+
+# Respond with a single valid JSON object with exactly two keys:
+# 1. "thought": one sentence explaining your reasoning
+# 2. "action": object with:
+#    - "action_type": one of observe | restart | isolate | rollback | drain_connections | reroute_traffic | scale_replica | declare_root_cause
+#    - "target": node id (string)
+#    - "failure_type": string — ONLY include when action_type is declare_root_cause
+
+# STRICT RULES:
+# - You cannot see a node's true health until you "observe" it. ALWAYS observe first.
+# - NEVER take irreversible actions (isolate, restart, rollback) on unobserved nodes.
+# - NEVER observe the same node twice.
+# - After observing a critical/degraded node, apply a fix action to it.
+# - Your FINAL action MUST be declare_root_cause with the correct node and failure_type.
+# - Follow dependency chains: api_gateway → auth_service → user_db, etc.
+# - Avoid documented trap actions — if something looks too obvious, think twice.
 # """
 
 
-# def wait_for_server(max_retries: int = 15, sleep_seconds: int = 1) -> bool:
-#     print(f"Waiting for server at {API_BASE_URL} ...")
-#     for _ in range(max_retries):
+# # ---------------------------------------------------------------------------
+# # Utilities
+# # ---------------------------------------------------------------------------
+
+# def wait_for_server(max_retries: int = 60, sleep_seconds: float = 1.0) -> bool:
+#     """Poll the local env server until 200 OK or retries are exhausted."""
+#     print(f"[INFO] Waiting for env server at {API_BASE_URL} ...", flush=True)
+#     for attempt in range(max_retries):
 #         try:
-#             response = requests.get(f"{API_BASE_URL}/", timeout=10)
-#             if response.status_code == 200:
-#                 print("Server is up!")
+#             r = requests.get(f"{API_BASE_URL}/", timeout=10)
+#             if r.status_code == 200:
+#                 print(f"[INFO] Server ready after {attempt + 1} attempt(s).", flush=True)
 #                 return True
 #         except Exception:
-#             time.sleep(sleep_seconds)
-#     print("Server did not become available in time.")
+#             pass
+#         time.sleep(sleep_seconds)
+#     print("[WARN] Env server did not become available in time.", flush=True)
 #     return False
 
 
-# def _declare_best_guess(state: dict) -> dict:
+# def _best_guess_action(state: dict) -> dict:
 #     """
-#     BUG FIX: When the LLM errors out mid-episode, we need to end the episode
-#     cleanly so /grader can return a score. This picks the most degraded visible node
-#     as a best-guess root cause declaration to avoid leaving the episode incomplete.
+#     Fallback when LLM errors or budget runs out without declare_root_cause.
+#     Picks the most suspicious node so the episode always ends with a score.
+
+#     Priority (lower = more suspicious):
+#       1 — critical status + visible symptoms
+#       2 — critical status (no visible symptoms)
+#       3 — degraded status + visible symptoms
+#       4 — degraded status (no visible symptoms)
+#       5 — any node with visible symptoms
+#       6 — everything else (healthy / hidden)
 #     """
-#     nodes = state.get("nodes", {})
-#     best_node = "api_gateway"
-#     worst_health = 1.0
-
-#     for node_id, data in nodes.items():
-#         h = data.get("health")
-#         if isinstance(h, (int, float)) and h < worst_health:
-#             worst_health = h
-#             best_node = node_id
-
-#     return {
-#         "action": "declare_root_cause",
-#         "target": best_node,
-#         "failure_type": "unknown"
-#     }
-
-
-# def run_smart_agent(scenario_id: str, external_call: bool = False) -> float:
-#     """
-#     Runs the LLM agent against a scenario.
-#     external_call=True mutes most print statements for automated evaluators.
-#     """
-#     if not external_call:
-#         print(f"\n========== RUNNING SMART AGENT: {scenario_id} ==========")
-
-#     try:
-#         state = requests.post(
-#             f"{API_BASE_URL}/reset",
-#             params={"scenario_id": scenario_id},
-#             timeout=30
-#         ).json()
-#     except Exception as e:
-#         if not external_call:
-#             print(f"Failed to reset server: {e}")
-#         return 0.0
-
-#     max_steps = state.get("steps_remaining", 15)
-#     llm_error_occurred = False
-
-#     for _ in range(max_steps):
-#         if not external_call:
-#             print(
-#                 f"\n[Step {state.get('step')}] "
-#                 f"Health: {state.get('system_health')} | "
-#                 f"Remaining: {state.get('steps_remaining')}"
-#             )
-
-#         prompt = f"CURRENT STATE:\n{json.dumps(state, indent=2)}\n\nWhat is your next move?"
-
-#         req_body = None
-#         try:
-#             response = client.chat.completions.create(
-#                 model=MODEL_NAME,
-#                 response_format={"type": "json_object"},
-#                 messages=[
-#                     {"role": "system", "content": SYSTEM_PROMPT},
-#                     {"role": "user", "content": prompt}
-#                 ]
-#             )
-
-#             content = response.choices[0].message.content
-#             decision = json.loads(content)
-
-#             if not external_call:
-#                 print(f"THOUGHT: {decision.get('thought')}")
-
-#             action_payload = decision.get("action", {})
-#             req_body = {
-#                 "action": action_payload.get("action_type", "observe"),
-#                 "target": action_payload.get("target", "api_gateway")
-#             }
-
-#             if "failure_type" in action_payload and action_payload["failure_type"] is not None:
-#                 req_body["failure_type"] = action_payload["failure_type"]
-
-#             if not external_call:
-#                 print(f"ACTION: {req_body['action']} -> {req_body['target']}")
-
-#         except Exception as e:
-#             if not external_call:
-#                 print(f"LLM Error: {e}")
-#             # BUG FIX: Don't just break on LLM error — send a declare_root_cause
-#             # so the episode ends cleanly and /grader can return a (low) score.
-#             # Previously the loop broke, the episode stayed incomplete, and /grader
-#             # returned a 400 error, giving final_score = 0.0 with no useful info.
-#             llm_error_occurred = True
-#             req_body = _declare_best_guess(state)
-
-#         try:
-#             res = requests.post(
-#                 f"{API_BASE_URL}/step",
-#                 json=req_body,
-#                 timeout=30
-#             ).json()
-#         except Exception as e:
-#             if not external_call:
-#                 print(f"Server execution error: {e}")
-#             break
-
-#         if res.get("info", {}).get("message") and not external_call:
-#             print(f"SERVER MSG: {res['info']['message']}")
-
-#         if res.get("done"):
-#             break
-
-#         if llm_error_occurred:
-#             # We already sent a declare — no point continuing the loop
-#             break
-
-#         state = res.get("observation", state)
-
-#     # Get Final Score
-#     final_score = 0.0
-#     try:
-#         score_data = requests.get(f"{API_BASE_URL}/grader", timeout=30).json()
-
-#         if "total" in score_data:
-#             final_score = float(score_data["total"])
-
-#             if not external_call:
-#                 print("\n========== EPISODE COMPLETE ==========")
-#                 print(f"FINAL SCORE: {final_score * 100:.1f}%")
-#                 print(json.dumps(score_data.get("breakdown", {}), indent=2))
-#         else:
-#             if not external_call:
-#                 print("\n========== EPISODE ENDED EARLY ==========")
-#                 print(f"Server returned: {score_data}")
-
-#     except Exception as e:
-#         if not external_call:
-#             print(f"Failed to fetch final score: {e}")
-
-#     return final_score
-
-
-# def run_baseline_suite() -> dict:
-#     """
-#     Runs one task from each difficulty bucket.
-#     """
-#     test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-#     scores = {}
-
-#     for task in test_tasks:
-#         try:
-#             scores[task] = run_smart_agent(task, external_call=True)
-#         except Exception as e:
-#             scores[task] = {"error": str(e)}
-
-#     return scores
-
-
-# if __name__ == "__main__":
-#     if wait_for_server():
-#         results = run_baseline_suite()
-#         print(json.dumps(results, indent=2))
-#     else:
-#         print("Server did not become available.")
-# """
-# inference.py
-# Fixes applied:
-#   1. _declare_best_guess() — was described in patch notes but completely absent.
-#      When the LLM call fails (exception or unparseable JSON), the agent now
-#      falls back to this function which picks the most suspicious node from the
-#      current observation and calls declare_root_cause.  Without this, LLM
-#      errors left episodes in a non-done state, /grader returned 400
-#      ("Episode not complete"), and the scenario scored 0.0.
-#   2. OPENAI_API_KEY check: raises a clear ValueError at import time if missing
-#      (keeps existing behaviour, unchanged).
-#   3. run_smart_agent: after the loop exits (budget exhausted or LLM break),
-#      if the episode is still not done, _declare_best_guess() is called.
-#   4. Added client-side env var for API_BASE_URL to support Docker port 7860.
-# """
-
-# import requests
-# import time
-# import json
-# import os
-# from openai import OpenAI
-
-# # -----------------------------
-# # Environment Configuration
-# # -----------------------------
-# # FIX: default to port 7860 to match the Docker EXPOSE and Dockerfile CMD.
-# # The old default of 8000 caused "connection refused" in the container.
-# API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
-# MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
-
-# if not OPENAI_API_KEY:
-#     raise ValueError("Missing OPENAI_API_KEY environment variable.")
-
-# client = OpenAI(
-#     api_key=OPENAI_API_KEY,
-#     base_url=OPENAI_BASE_URL,
-# )
-
-# SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed system.
-# You will be given a JSON representation of the system state.
-# You must output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
-# 1. "thought": A brief string explaining your reasoning based on dependencies and symptoms.
-# 2. "action": An object containing "action_type", "target", and optionally "failure_type".
-
-# Available actions: observe, restart, isolate, rollback, drain_connections, reroute_traffic, scale_replica, declare_root_cause.
-
-# RULES:
-# - You cannot see a node's true health until you 'observe' it. DO THIS FIRST.
-# - Do NOT take irreversible actions (isolate, restart, rollback) on a node you haven't observed.
-# - DO NOT observe the same node multiple times.
-# - Once you observe the suspicious upstream node, you MUST execute a fix (like drain_connections, rollback, or restart).
-# - If you find the issue and fix it, the final action must be 'declare_root_cause' with the node and failure_type.
-# """
-
-
-# def wait_for_server(max_retries: int = 15, sleep_seconds: int = 1) -> bool:
-#     print(f"Waiting for server at {API_BASE_URL} ...")
-#     for _ in range(max_retries):
-#         try:
-#             response = requests.get(f"{API_BASE_URL}/", timeout=10)
-#             if response.status_code == 200:
-#                 print("Server is up!")
-#                 return True
-#         except Exception:
-#             time.sleep(sleep_seconds)
-#     return False
-
-
-# def _declare_best_guess(state: dict, external_call: bool = False) -> dict:
-#     """
-#     FIX: This function was described in patch notes but never existed in the file.
-#     Fallback used when the LLM fails or the step budget runs out without a
-#     declare_root_cause action.  It picks the most suspicious node (critical health,
-#     observable, with symptoms) and issues a declare_root_cause so the episode
-#     ends with a score instead of 0.0.
-
-#     Returns the req_body dict to POST to /step.
-#     """
-#     nodes = state.get("nodes", {})
-
-#     # Priority: critical observable nodes with symptoms, then degraded, then anything
+#     nodes      = state.get("nodes", {})
 #     candidates = []
+
 #     for node_id, node_data in nodes.items():
-#         health = node_data.get("health")
+#         health   = node_data.get("health")
 #         symptoms = node_data.get("visible_symptoms", [])
-#         status = node_data.get("status", "")
+#         status   = node_data.get("status", "")
 
-#         if health == "hidden":
-#             priority = 5  # We can't see it, lower priority
+#         if status == "critical" and symptoms:
+#             prio = 1
 #         elif status == "critical":
-#             priority = 1
+#             prio = 2
 #         elif status == "degraded" and symptoms:
-#             priority = 2
+#             prio = 3
 #         elif status == "degraded":
-#             priority = 3
+#             prio = 4
 #         elif symptoms:
-#             priority = 4
+#             prio = 5
 #         else:
-#             priority = 6
+#             prio = 6
 
-#         candidates.append((priority, node_id, node_data))
+#         h_val = health if isinstance(health, (int, float)) else 1.0
+#         candidates.append((prio, h_val, node_id, symptoms))
 
-#     candidates.sort(key=lambda x: x[0])
+#     candidates.sort(key=lambda x: (x[0], x[1]))
 
-#     best_node = candidates[0][1] if candidates else "api_gateway"
-#     best_node_data = candidates[0][2] if candidates else {}
+#     best_node    = candidates[0][2] if candidates else "api_gateway"
+#     best_syms    = candidates[0][3] if candidates else []
+#     failure_type = best_syms[0]     if best_syms   else "unknown_failure"
 
-#     # Guess a failure type from visible symptoms if possible
-#     symptoms = best_node_data.get("visible_symptoms", [])
-#     if symptoms:
-#         failure_type = symptoms[0]  # Use first symptom as failure type hint
-#     else:
-#         failure_type = "unknown_failure"
-
-#     if not external_call:
-#         print(f"[BestGuess Fallback] Declaring root cause: {best_node} / {failure_type}")
-
+#     print(f"[INFO] Best-guess fallback → {best_node} / {failure_type}", flush=True)
 #     return {
-#         "action": "declare_root_cause",
-#         "target": best_node,
+#         "action":       "declare_root_cause",
+#         "target":       best_node,
 #         "failure_type": failure_type,
 #     }
 
 
-# def run_smart_agent(scenario_id: str, external_call: bool = False) -> float:
+# def _call_llm(state: dict) -> dict | None:
 #     """
-#     Runs the LLM agent against a scenario.
-#     external_call=True mutes most print statements for automated evaluators.
+#     Calls the LLM through the OpenAI client (which points at API_BASE_URL).
+#     Returns a parsed req_body dict ready for POST /step, or None on failure.
+#     ALL LLM traffic goes through API_BASE_URL — the validator's LiteLLM proxy.
 #     """
-#     if not external_call:
-#         print(f"\n========== RUNNING SMART AGENT: {scenario_id} ==========")
-
+#     prompt = (
+#         f"CURRENT SYSTEM STATE:\n{json.dumps(state, indent=2)}\n\n"
+#         "What is your next action? Respond with JSON only."
+#     )
 #     try:
-#         state = requests.post(
+#         response = client.chat.completions.create(
+#             model=MODEL_NAME,
+#             response_format={"type": "json_object"},
+#             messages=[
+#                 {"role": "system", "content": SYSTEM_PROMPT},
+#                 {"role": "user",   "content": prompt},
+#             ],
+#         )
+#         content        = response.choices[0].message.content
+#         decision       = json.loads(content)
+#         action_payload = decision.get("action", {})
+
+#         req_body: dict = {
+#             "action": action_payload.get("action_type", "observe"),
+#             "target": action_payload.get("target",      "api_gateway"),
+#         }
+#         ft = action_payload.get("failure_type")
+#         if ft is not None:
+#             req_body["failure_type"] = ft
+
+#         return req_body
+
+#     except Exception as exc:
+#         print(f"[WARN] LLM call failed: {exc}", flush=True)
+#         return None
+
+
+# # ---------------------------------------------------------------------------
+# # Main agent loop — one scenario
+# # ---------------------------------------------------------------------------
+
+# def run_smart_agent(scenario_id: str) -> float:
+#     """
+#     Runs the LLM SRE agent against one scenario.
+#     Emits [START] / [STEP] / [END] structured logs to stdout.
+#     Returns final grader score in [0.0, 1.0].
+#     """
+#     log_start(task=scenario_id, env=BENCHMARK, model=MODEL_NAME)
+
+#     # --- Reset the environment ---
+#     try:
+#         resp  = requests.post(
 #             f"{API_BASE_URL}/reset",
 #             params={"scenario_id": scenario_id},
 #             timeout=30,
-#         ).json()
-#     except Exception as e:
-#         if not external_call:
-#             print(f"Failed to reset server: {e}")
+#         )
+#         state = resp.json()
+#     except Exception as exc:
+#         print(f"[ERROR] Failed to reset env for {scenario_id}: {exc}", flush=True)
+#         log_end(task=scenario_id, score=0.0, steps=0, success=False)
 #         return 0.0
 
-#     max_steps = state.get("steps_remaining", 15)
+#     max_steps    = state.get("steps_remaining", 15)
 #     episode_done = False
+#     steps_taken  = 0
+#     score        = 0.0
 
-#     for _ in range(max_steps):
+#     for step_num in range(1, max_steps + 1):
 #         if state.get("steps_remaining", 0) <= 0:
 #             break
 
-#         if not external_call:
-#             print(
-#                 f"\n[Step {state.get('step')}] "
-#                 f"Health: {state.get('system_health')} | "
-#                 f"Remaining: {state.get('steps_remaining')}"
-#             )
+#         # --- Get action from LLM or fall back to best-guess ---
+#         req_body = _call_llm(state)
+#         if req_body is None:
+#             req_body = _best_guess_action(state)
 
-#         prompt = f"CURRENT STATE:\n{json.dumps(state, indent=2)}\n\nWhat is your next move?"
+#         # Build a readable action label for the [STEP] log
+#         action_label = req_body.get("action", "unknown")
+#         target       = req_body.get("target", "")
+#         if target:
+#             action_label = f"{action_label}:{target}"
 
-#         llm_failed = False
-#         req_body = None
-
+#         # --- Execute step on the local env server ---
 #         try:
-#             response = client.chat.completions.create(
-#                 model=MODEL_NAME,
-#                 response_format={"type": "json_object"},
-#                 messages=[
-#                     {"role": "system", "content": SYSTEM_PROMPT},
-#                     {"role": "user", "content": prompt},
-#                 ],
-#             )
-
-#             content = response.choices[0].message.content
-#             decision = json.loads(content)
-
-#             if not external_call:
-#                 print(f"THOUGHT: {decision.get('thought')}")
-
-#             action_payload = decision.get("action", {})
-#             req_body = {
-#                 "action": action_payload.get("action_type", "observe"),
-#                 "target": action_payload.get("target", "api_gateway"),
-#             }
-
-#             if "failure_type" in action_payload and action_payload["failure_type"] is not None:
-#                 req_body["failure_type"] = action_payload["failure_type"]
-
-#             if not external_call:
-#                 print(f"ACTION: {req_body['action']} -> {req_body['target']}")
-
-#         except Exception as e:
-#             if not external_call:
-#                 print(f"LLM Error: {e} — using best-guess fallback")
-#             llm_failed = True
-
-#         # FIX: If LLM failed, use best-guess fallback instead of hard break.
-#         # The old code did `break` here, leaving the episode incomplete.
-#         if llm_failed or req_body is None:
-#             req_body = _declare_best_guess(state, external_call)
-
-#         try:
-#             res = requests.post(
+#             res    = requests.post(
 #                 f"{API_BASE_URL}/step",
 #                 json=req_body,
 #                 timeout=30,
 #             ).json()
-#         except Exception as e:
-#             if not external_call:
-#                 print(f"Server execution error: {e}")
+#         except Exception as exc:
+#             print(f"[ERROR] /step failed: {exc}", flush=True)
+#             log_step(step=step_num, action=action_label, reward=0.0, done=False)
 #             break
 
-#         if res.get("info", {}).get("message") and not external_call:
-#             print(f"SERVER MSG: {res['info']['message']}")
+#         reward      = float(res.get("reward", 0.0) or 0.0)
+#         done        = bool(res.get("done",   False))
+#         steps_taken = step_num
 
-#         if res.get("done"):
+#         # Mandatory [STEP] log — emitted for every single step
+#         log_step(step=step_num, action=action_label, reward=reward, done=done)
+
+#         if done:
 #             episode_done = True
 #             break
 
-#         state = res.get("observation", state)
+#         state = res.get("observation") or state
 
-#     # FIX: If the loop ended without declare_root_cause (budget exhausted),
-#     # force a best-guess declaration so /grader doesn't return 400.
+#     # --- Force-close if budget exhausted without declare_root_cause ---
 #     if not episode_done:
-#         if not external_call:
-#             print("[Post-loop] Episode not done — issuing final best-guess declaration.")
-#         req_body = _declare_best_guess(state, external_call)
+#         print("[INFO] Budget exhausted — sending final best-guess declaration.", flush=True)
+#         fallback = _best_guess_action(state)
 #         try:
-#             requests.post(f"{API_BASE_URL}/step", json=req_body, timeout=30)
-#         except Exception as e:
-#             if not external_call:
-#                 print(f"Failed to send final best-guess: {e}")
+#             requests.post(f"{API_BASE_URL}/step", json=fallback, timeout=30)
+#         except Exception as exc:
+#             print(f"[WARN] Failed to send fallback declaration: {exc}", flush=True)
 
-#     final_score = 0.0
+#     # --- Fetch final grader score ---
 #     try:
 #         score_data = requests.get(f"{API_BASE_URL}/grader", timeout=30).json()
-
 #         if "total" in score_data:
-#             final_score = float(score_data["total"])
+#             score = float(score_data["total"])
+#         print(f"[INFO] Grader result: {json.dumps(score_data)}", flush=True)
+#     except Exception as exc:
+#         print(f"[WARN] Failed to fetch grader score: {exc}", flush=True)
 
-#             if not external_call:
-#                 print("\n========== EPISODE COMPLETE ==========")
-#                 print(f"FINAL SCORE: {final_score * 100:.1f}%")
-#                 print(json.dumps(score_data.get("breakdown", {}), indent=2))
-#         else:
-#             if not external_call:
-#                 print("\n========== EPISODE ENDED EARLY ==========")
-#                 print(f"Server returned: {score_data}")
+#     success = score >= SUCCESS_SCORE_THRESHOLD
+#     log_end(task=scenario_id, score=score, steps=steps_taken, success=success)
+#     return score
 
-#     except Exception as e:
-#         if not external_call:
-#             print(f"Failed to fetch final score: {e}")
 
-#     return final_score
-
+# # ---------------------------------------------------------------------------
+# # Baseline suite — one scenario per difficulty tier
+# # ---------------------------------------------------------------------------
 
 # def run_baseline_suite() -> dict:
-#     """Runs one task from each difficulty bucket."""
-#     test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-#     scores = {}
-
-#     for task in test_tasks:
+#     """Runs easy_e1, medium_m2, hard_h2 and returns their scores."""
+#     results: dict = {}
+#     for task in ["easy_e1", "medium_m2", "hard_h2"]:
 #         try:
-#             scores[task] = run_smart_agent(task, external_call=True)
-#         except Exception as e:
-#             scores[task] = {"error": str(e)}
+#             results[task] = run_smart_agent(task)
+#         except Exception as exc:
+#             print(f"[ERROR] {task} raised: {exc}", flush=True)
+#             results[task] = 0.0
+#     return results
 
-#     return scores
 
+# # ---------------------------------------------------------------------------
+# # Entry point
+# # ---------------------------------------------------------------------------
 
 # if __name__ == "__main__":
 #     if wait_for_server():
-#         results = run_baseline_suite()
-#         print(json.dumps(results, indent=2))
+#         final_results = run_baseline_suite()
+#         print(json.dumps(final_results, indent=2), flush=True)
 #     else:
-#         print("Server did not become available.")
+#         print("[ERROR] Env server unavailable. Exiting.", flush=True)
+#         sys.exit(1)
+"""
+inference.py — CascadeDebugEnv baseline agent
+==============================================
 
-# inference.py
-# FIXES applied:
-#   1. API_BASE_URL defaults to port 7860 (matches Dockerfile EXPOSE + CMD).
-#      Old client.py default was 8000 — caused "connection refused" in Docker.
-#   2. OPENAI_API_KEY: raises clear ValueError at import time if missing,
-#      instead of assigning None to os.environ (TypeError deep in OpenAI client).
-#   3. _declare_best_guess(): was described in patch notes but the implementation
-#      was incomplete. Now ranks nodes by severity (critical > degraded+symptoms >
-#      degraded > symptoms only > healthy) and picks the best candidate.
-#   4. run_smart_agent: LLM exception no longer does a hard break leaving the
-#      episode incomplete. Falls back to _declare_best_guess() so /grader always
-#      returns a score instead of 400 "Episode not complete".
-#   5. run_smart_agent: post-loop check — if the loop exited via budget exhaustion
-#      without a declare action, fires one final _declare_best_guess() call.
-#   6. state update: uses res.get("observation", state) so if observation is None
-#      (shouldn't happen but might on a server error) the loop continues with the
-#      last good state rather than crashing on json.dumps(None).
+HACKATHON VALIDATOR REQUIREMENTS:
+  [x] API_BASE_URL and API_KEY are taken strictly from os.environ
+  [x] MODEL_NAME is read from env with a default
+  [x] HF_TOKEN and LOCAL_IMAGE_NAME remain present
+  [x] OpenAI client uses base_url=API_BASE_URL and api_key=API_KEY
+  [x] [START] / [STEP] / [END] plain-text stdout logs, flush=True
+  [x] No hardcoded keys or provider URLs
+"""
 
 import requests
 import time
 import json
 import os
+import sys
+
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
-# Environment configuration — all read from env vars for Docker compatibility
+# Environment configuration
+# Validator injects: API_BASE_URL, API_KEY, MODEL_NAME
 # ---------------------------------------------------------------------------
-# FIX 1: default port 7860 — matches Dockerfile CMD uvicorn ... --port 7860
-API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:7860").rstrip("/")
-MODEL_NAME   = os.getenv("MODEL_NAME",   "llama-3.3-70b-versatile")
-OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
 
-# FIX 2: Fail fast at import time with a human-readable error
-if not OPENAI_API_KEY:
-    raise ValueError(
-        "OPENAI_API_KEY environment variable is not set. "
-        "Export it before running: export OPENAI_API_KEY=gsk_..."
-    )
+API_BASE_URL     = os.environ["API_BASE_URL"].rstrip("/")
+API_KEY          = os.environ["API_KEY"]
+MODEL_NAME       = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+HF_TOKEN         = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
+# All LLM calls must go through the validator-provided proxy
 client = OpenAI(
-    api_key=OPENAI_API_KEY,
-    base_url=OPENAI_BASE_URL,
+    api_key=API_KEY,
+    base_url=API_BASE_URL,
 )
 
-SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) debugging a distributed system.
-You will be given a JSON representation of the system state.
-You must output YOUR ENTIRE RESPONSE as a valid JSON object with exactly two keys:
-1. "thought": A brief string explaining your reasoning based on dependencies and symptoms.
-2. "action": An object containing "action_type", "target", and optionally "failure_type".
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+BENCHMARK               = "CascadeDebugEnv"
+SUCCESS_SCORE_THRESHOLD = 0.5
 
-Available actions: observe, restart, isolate, rollback, drain_connections, reroute_traffic, scale_replica, declare_root_cause.
+# ---------------------------------------------------------------------------
+# Mandatory structured log helpers
+# Exact plain-text format required by validator:
+#   [START] task=easy_e1 env=CascadeDebugEnv model=llama-3.3-70b-versatile
+#   [STEP] step=1 action=observe:auth_service reward=0.08 done=False
+#   [END] task=easy_e1 score=0.75 steps=4 success=True
+# Rules: stdout only, flush=True, plain key=value (NOT JSON)
+# ---------------------------------------------------------------------------
 
-RULES:
-- You cannot see a node's true health until you 'observe' it. DO THIS FIRST.
-- Do NOT take irreversible actions (isolate, restart, rollback) on a node you haven't observed.
-- DO NOT observe the same node multiple times.
-- Once you observe the suspicious upstream node, you MUST execute a fix (like drain_connections, rollback, or restart).
-- If you find the issue and fix it, the final action must be 'declare_root_cause' with the node and failure_type.
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool) -> None:
+    print(
+        f"[STEP] step={step} action={action} reward={round(reward, 4)} done={done}",
+        flush=True,
+    )
+
+
+def log_end(task: str, score: float, steps: int, success: bool) -> None:
+    print(
+        f"[END] task={task} score={round(score, 4)} steps={steps} success={success}",
+        flush=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SRE agent system prompt
+# ---------------------------------------------------------------------------
+SYSTEM_PROMPT = """You are an elite Site Reliability Engineer (SRE) diagnosing a distributed microservice system.
+You receive a JSON snapshot of the current system state.
+
+Respond with a single valid JSON object with exactly two keys:
+1. "thought": one sentence explaining your reasoning
+2. "action": object with:
+   - "action_type": one of observe | restart | isolate | rollback | drain_connections | reroute_traffic | scale_replica | declare_root_cause
+   - "target": node id (string)
+   - "failure_type": string — ONLY include when action_type is declare_root_cause
+
+STRICT RULES:
+- You cannot see a node's true health until you "observe" it. ALWAYS observe first.
+- NEVER take irreversible actions (isolate, restart, rollback) on unobserved nodes.
+- NEVER observe the same node twice.
+- After observing a critical/degraded node, apply a fix action to it.
+- Your FINAL action MUST be declare_root_cause with the correct node and failure_type.
+- Follow dependency chains: api_gateway → auth_service → user_db, etc.
+- Avoid documented trap actions — if something looks too obvious, think twice.
 """
 
 
-def wait_for_server(max_retries: int = 15, sleep_seconds: int = 1) -> bool:
-    print(f"Waiting for server at {API_BASE_URL} ...")
-    for _ in range(max_retries):
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+def wait_for_server(max_retries: int = 60, sleep_seconds: float = 1.0) -> bool:
+    """Poll the local env server until 200 OK or retries are exhausted."""
+    print(f"[INFO] Waiting for env server at {API_BASE_URL} ...", flush=True)
+    for attempt in range(max_retries):
         try:
-            response = requests.get(f"{API_BASE_URL}/", timeout=10)
-            if response.status_code == 200:
-                print("Server is up!")
+            r = requests.get(f"{API_BASE_URL}/", timeout=10)
+            if r.status_code == 200:
+                print(f"[INFO] Server ready after {attempt + 1} attempt(s).", flush=True)
                 return True
         except Exception:
-            time.sleep(sleep_seconds)
-    print("Server did not become available in time.")
+            pass
+        time.sleep(sleep_seconds)
+    print("[WARN] Env server did not become available in time.", flush=True)
     return False
 
 
-def _declare_best_guess(state: dict, external_call: bool = False) -> dict:
+def _best_guess_action(state: dict) -> dict:
     """
-    FIX 3: Emergency fallback when the LLM errors or the budget runs out
-    without a declare_root_cause. Picks the most suspicious visible node
-    so the episode always ends with a score instead of a 400 from /grader.
+    Fallback when LLM errors or budget runs out without declare_root_cause.
+    Picks the most suspicious node so the episode always ends with a score.
 
-    Priority ranking:
-      1 — critical status with visible symptoms
-      2 — critical status (no symptoms visible)
-      3 — degraded with visible symptoms
-      4 — degraded (no symptoms)
-      5 — any node with symptoms
-      6 — everything else
+    Priority (lower = more suspicious):
+      1 — critical status + visible symptoms
+      2 — critical status (no visible symptoms)
+      3 — degraded status + visible symptoms
+      4 — degraded status (no visible symptoms)
+      5 — any node with visible symptoms
+      6 — everything else (healthy / hidden)
     """
-    nodes = state.get("nodes", {})
+    nodes      = state.get("nodes", {})
     candidates = []
 
     for node_id, node_data in nodes.items():
@@ -3705,34 +3256,28 @@ def _declare_best_guess(state: dict, external_call: bool = False) -> dict:
         status   = node_data.get("status", "")
 
         if status == "critical" and symptoms:
-            priority = 1
+            prio = 1
         elif status == "critical":
-            priority = 2
+            prio = 2
         elif status == "degraded" and symptoms:
-            priority = 3
+            prio = 3
         elif status == "degraded":
-            priority = 4
+            prio = 4
         elif symptoms:
-            priority = 5
+            prio = 5
         else:
-            priority = 6
+            prio = 6
 
-        # Use numeric health as tiebreaker (lower = worse = more suspicious)
         h_val = health if isinstance(health, (int, float)) else 1.0
-        candidates.append((priority, h_val, node_id, symptoms))
+        candidates.append((prio, h_val, node_id, symptoms))
 
-    # Sort by priority asc, then health asc (sickest first within same priority)
     candidates.sort(key=lambda x: (x[0], x[1]))
 
-    best_node = candidates[0][2] if candidates else "api_gateway"
-    best_symptoms = candidates[0][3] if candidates else []
+    best_node    = candidates[0][2] if candidates else "api_gateway"
+    best_syms    = candidates[0][3] if candidates else []
+    failure_type = best_syms[0]     if best_syms   else "unknown_failure"
 
-    # Use first symptom as a hint for failure_type — better than "unknown"
-    failure_type = best_symptoms[0] if best_symptoms else "unknown_failure"
-
-    if not external_call:
-        print(f"[BestGuess] Fallback declaration → {best_node} / {failure_type}")
-
+    print(f"[INFO] Best-guess fallback → {best_node} / {failure_type}", flush=True)
     return {
         "action":       "declare_root_cause",
         "target":       best_node,
@@ -3740,156 +3285,164 @@ def _declare_best_guess(state: dict, external_call: bool = False) -> dict:
     }
 
 
-def run_smart_agent(scenario_id: str, external_call: bool = False) -> float:
+def _call_llm(state: dict) -> dict | None:
     """
-    Runs the LLM agent against a scenario.
-    Returns the final grader score (0.0–1.0).
-    external_call=True suppresses print output for the automated evaluator.
+    Calls the LLM through the OpenAI client (which points at API_BASE_URL).
+    Returns a parsed req_body dict ready for POST /step, or None on failure.
+    ALL LLM traffic goes through API_BASE_URL — the validator's LiteLLM proxy.
     """
-    if not external_call:
-        print(f"\n========== RUNNING SMART AGENT: {scenario_id} ==========")
-
-    # Reset the environment
+    prompt = (
+        f"CURRENT SYSTEM STATE:\n{json.dumps(state, indent=2)}\n\n"
+        "What is your next action? Respond with JSON only."
+    )
     try:
-        state = requests.post(
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": prompt},
+            ],
+        )
+        content        = response.choices[0].message.content
+        decision       = json.loads(content)
+        action_payload = decision.get("action", {})
+
+        req_body: dict = {
+            "action": action_payload.get("action_type", "observe"),
+            "target": action_payload.get("target",      "api_gateway"),
+        }
+        ft = action_payload.get("failure_type")
+        if ft is not None:
+            req_body["failure_type"] = ft
+
+        return req_body
+
+    except Exception as exc:
+        print(f"[WARN] LLM call failed: {exc}", flush=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Main agent loop — one scenario
+# ---------------------------------------------------------------------------
+
+def run_smart_agent(scenario_id: str) -> float:
+    """
+    Runs the LLM SRE agent against one scenario.
+    Emits [START] / [STEP] / [END] structured logs to stdout.
+    Returns final grader score in [0.0, 1.0].
+    """
+    log_start(task=scenario_id, env=BENCHMARK, model=MODEL_NAME)
+
+    # --- Reset the environment ---
+    try:
+        resp  = requests.post(
             f"{API_BASE_URL}/reset",
             params={"scenario_id": scenario_id},
             timeout=30,
-        ).json()
-    except Exception as e:
-        if not external_call:
-            print(f"Failed to reset server: {e}")
+        )
+        state = resp.json()
+    except Exception as exc:
+        print(f"[ERROR] Failed to reset env for {scenario_id}: {exc}", flush=True)
+        log_end(task=scenario_id, score=0.0, steps=0, success=False)
         return 0.0
 
     max_steps    = state.get("steps_remaining", 15)
     episode_done = False
+    steps_taken  = 0
+    score        = 0.0
 
-    for _ in range(max_steps):
-        # Safety: stop if the server already considers episode done
+    for step_num in range(1, max_steps + 1):
         if state.get("steps_remaining", 0) <= 0:
             break
 
-        if not external_call:
-            print(
-                f"\n[Step {state.get('step')}] "
-                f"Health: {state.get('system_health')} | "
-                f"Remaining: {state.get('steps_remaining')}"
-            )
+        # --- Get action from LLM or fall back to best-guess ---
+        req_body = _call_llm(state)
+        if req_body is None:
+            req_body = _best_guess_action(state)
 
-        prompt   = f"CURRENT STATE:\n{json.dumps(state, indent=2)}\n\nWhat is your next move?"
-        req_body = None
-        llm_ok   = True
+        # Build a readable action label for the [STEP] log
+        action_label = req_body.get("action", "unknown")
+        target       = req_body.get("target", "")
+        if target:
+            action_label = f"{action_label}:{target}"
 
+        # --- Execute step on the local env server ---
         try:
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": prompt},
-                ],
-            )
-            content  = response.choices[0].message.content
-            decision = json.loads(content)
-
-            if not external_call:
-                print(f"THOUGHT: {decision.get('thought')}")
-
-            action_payload = decision.get("action", {})
-            req_body = {
-                "action": action_payload.get("action_type", "observe"),
-                "target": action_payload.get("target", "api_gateway"),
-            }
-            if "failure_type" in action_payload and action_payload["failure_type"] is not None:
-                req_body["failure_type"] = action_payload["failure_type"]
-
-            if not external_call:
-                print(f"ACTION: {req_body['action']} -> {req_body['target']}")
-
-        except Exception as e:
-            if not external_call:
-                print(f"LLM Error: {e} — using best-guess fallback")
-            llm_ok = False
-
-        # FIX 4: If LLM failed, use best-guess instead of breaking the loop.
-        if not llm_ok or req_body is None:
-            req_body = _declare_best_guess(state, external_call)
-
-        # Execute step on server
-        try:
-            res = requests.post(
+            res    = requests.post(
                 f"{API_BASE_URL}/step",
                 json=req_body,
                 timeout=30,
             ).json()
-        except Exception as e:
-            if not external_call:
-                print(f"Server step error: {e}")
+        except Exception as exc:
+            print(f"[ERROR] /step failed: {exc}", flush=True)
+            log_step(step=step_num, action=action_label, reward=0.0, done=False)
             break
 
-        if res.get("info", {}).get("message") and not external_call:
-            print(f"SERVER MSG: {res['info']['message']}")
+        reward      = float(res.get("reward", 0.0) or 0.0)
+        done        = bool(res.get("done",   False))
+        steps_taken = step_num
 
-        if res.get("done"):
+        # Mandatory [STEP] log — emitted for every single step
+        log_step(step=step_num, action=action_label, reward=reward, done=done)
+
+        if done:
             episode_done = True
             break
 
-        # FIX 6: Fallback to previous state if observation is missing
         state = res.get("observation") or state
 
-    # FIX 5: If loop exited without a declare (budget ran out), force one now
+    # --- Force-close if budget exhausted without declare_root_cause ---
     if not episode_done:
-        if not external_call:
-            print("[Post-loop] Budget exhausted — issuing final best-guess declaration.")
-        fallback = _declare_best_guess(state, external_call)
+        print("[INFO] Budget exhausted — sending final best-guess declaration.", flush=True)
+        fallback = _best_guess_action(state)
         try:
             requests.post(f"{API_BASE_URL}/step", json=fallback, timeout=30)
-        except Exception as e:
-            if not external_call:
-                print(f"Failed to send post-loop declaration: {e}")
+        except Exception as exc:
+            print(f"[WARN] Failed to send fallback declaration: {exc}", flush=True)
 
-    # Fetch final score
-    final_score = 0.0
+    # --- Fetch final grader score ---
     try:
         score_data = requests.get(f"{API_BASE_URL}/grader", timeout=30).json()
-
         if "total" in score_data:
-            final_score = float(score_data["total"])
-            if not external_call:
-                print("\n========== EPISODE COMPLETE ==========")
-                print(f"FINAL SCORE: {final_score * 100:.1f}%")
-                print(json.dumps(score_data.get("breakdown", {}), indent=2))
-        else:
-            if not external_call:
-                print("\n========== EPISODE ENDED EARLY ==========")
-                print(f"Server returned: {score_data}")
+            score = float(score_data["total"])
+        print(f"[INFO] Grader result: {json.dumps(score_data)}", flush=True)
+    except Exception as exc:
+        print(f"[WARN] Failed to fetch grader score: {exc}", flush=True)
 
-    except Exception as e:
-        if not external_call:
-            print(f"Failed to fetch final score: {e}")
+    success = score >= SUCCESS_SCORE_THRESHOLD
+    log_end(task=scenario_id, score=score, steps=steps_taken, success=success)
+    return score
 
-    return final_score
 
+# ---------------------------------------------------------------------------
+# Baseline suite — one scenario per difficulty tier
+# ---------------------------------------------------------------------------
 
 def run_baseline_suite() -> dict:
-    """Runs one task from each difficulty bucket and returns scores."""
-    test_tasks = ["easy_e1", "medium_m2", "hard_h2"]
-    scores = {}
-    for task in test_tasks:
+    """Runs easy_e1, medium_m2, hard_h2 and returns their scores."""
+    results: dict = {}
+    for task in ["easy_e1", "medium_m2", "hard_h2"]:
         try:
-            scores[task] = run_smart_agent(task, external_call=True)
-        except Exception as e:
-            scores[task] = {"error": str(e)}
-    return scores
+            results[task] = run_smart_agent(task)
+        except Exception as exc:
+            print(f"[ERROR] {task} raised: {exc}", flush=True)
+            results[task] = 0.0
+    return results
 
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     if wait_for_server():
-        results = run_baseline_suite()
-        print(json.dumps(results, indent=2))
+        final_results = run_baseline_suite()
+        print(json.dumps(final_results, indent=2), flush=True)
     else:
-        print("Server did not become available.")
-
+        print("[ERROR] Env server unavailable. Exiting.", flush=True)
+        sys.exit(1)
 ===== ./models.py =====
 
 # from pydantic import BaseModel, Field
@@ -4447,22 +4000,24 @@ def main():
 if __name__ == "__main__":
     main()
 ===== ./server/cascade_debug_env_environment.py =====
-# # server/cascade_debug_env_environment.py
+
+
 # import json
 # from typing import Dict, List, Optional
 # from .cascade_engine import propagate_failures
 # from .grader import CascadeGrader
 
+
 # class SystemState:
 #     """Internal tracker for the true state of the simulated microservices."""
+
 #     def __init__(self, scenario: dict):
 #         self.scenario_id = scenario["scenario_id"]
 #         self.step = 0
 #         self.steps_remaining = scenario["step_budget"]
 #         self.intervention_log = []
 #         self.done = False
-        
-#         # Load initial nodes from the JSON scenario
+
 #         self.nodes = {}
 #         for node_id, data in scenario["initial_node_states"].items():
 #             self.nodes[node_id] = {
@@ -4470,163 +4025,16 @@ if __name__ == "__main__":
 #                 "health": data["health"],
 #                 "observable": data["observable"],
 #                 "visible_symptoms": data.get("visible_symptoms", []),
-#                 "is_isolated": False
+#                 "is_isolated": False,
 #             }
-            
+
 #     @property
 #     def system_health(self) -> float:
-#         healths = [n["health"] for n in self.nodes.values() if isinstance(n["health"], (int, float))]
-#         if not healths: return 0.0
-#         return round(sum(healths) / len(healths), 3)
-
-
-# class CascadeDebugEnvironment:
-#     """The main interface for the OpenEnv server to interact with."""
-#     def __init__(self, scenario_dict: dict):
-#         self.scenario_dict = scenario_dict
-#         self.state = SystemState(scenario_dict)
-#         self.grader = CascadeGrader(scenario_dict["scenario_id"], scenario_dict["ground_truth"])
-#         self.initial_health = self.state.system_health
-        
-#         # Load pending failures from the scenario (e.g., slow memory leaks)
-#         self.pending_cascades = [
-#             {
-#                 "node_id": f["node"],
-#                 "failure_type": f["type"],
-#                 "steps_until_propagation": f.get("degradation_delay_steps", 0)
-#             }
-#             for f in scenario_dict.get("failure_injections", [])
+#         healths = [
+#             n["health"]
+#             for n in self.nodes.values()
+#             if isinstance(n["health"], (int, float))
 #         ]
-#         self.last_action = {}
-
-#     def step(self, action: str, target: str, failure_type: str = None) -> dict:
-#         """Executes a single step in the environment."""
-#         if self.state.done:
-#             return {"error": "Episode already finished."}
-
-#         # --- Intercept for Hard H3 Decoy Wall ---
-#         if self.state.scenario_id == "hard_h3" and target == "payment_gateway":
-#             msg = "payment_gateway is an external service managed by a third-party. Circuit breaker has been active for 72 hours. This is expected baseline behavior. No available actions affect this service."
-#             self.state.step += 1
-#             self.state.steps_remaining -= 1
-#             self.state.intervention_log.append({"action": action, "target": target, "result": msg})
-            
-#             if self.state.steps_remaining <= 0:
-#                 self.state.done = True
-                
-#             return {"observation": self.get_observation(), "message": msg, "done": self.state.done}
-
-#         # --- Process Normal Action ---
-#         self.state.step += 1
-#         self.state.steps_remaining -= 1
-#         self.last_action = {"action": action, "target": target}
-        
-#         log_entry = {"action": action, "target": target}
-#         if failure_type: 
-#             log_entry["failure_type"] = failure_type
-
-#         # Action Logic
-#         if action == "observe":
-#             if target in self.state.nodes:
-#                 self.state.nodes[target]["observable"] = True
-#                 # Medium M3 Specific Log Reveal trap
-#                 if self.state.scenario_id == "medium_m3" and target == "auth_service":
-#                     injections = self.scenario_dict.get("failure_injections", [])
-#                     if injections and "log_entry_on_observe" in injections[0]:
-#                         log_entry["log_revealed"] = injections[0]["log_entry_on_observe"]
-                        
-#         elif action == "isolate":
-#             if target in self.state.nodes:
-#                 self.state.nodes[target]["is_isolated"] = True
-                
-#         elif action == "declare_root_cause":
-#             self.state.done = True
-#             log_entry["failure_type"] = failure_type
-
-#         self.state.intervention_log.append(log_entry)
-
-#         # Check step budget
-#         if self.state.steps_remaining <= 0 and not self.state.done:
-#             self.state.done = True
-
-#         # Run cascade engine to worsen the system if the agent didn't fix it
-#         if not self.state.done:
-#             self.pending_cascades = propagate_failures(self.state, self.pending_cascades, self.last_action)
-
-#         return {"observation": self.get_observation(), "done": self.state.done}
-
-#     def get_observation(self) -> dict:
-#         """Constructs the partial view of the system that the agent is allowed to see."""
-#         nodes_view = {}
-#         for node_id, node_data in self.state.nodes.items():
-#             nodes_view[node_id] = {
-#                 "status": node_data["status"],
-#                 "health": node_data["health"] if node_data["observable"] else "hidden",
-#                 "visible_symptoms": node_data["visible_symptoms"],
-#                 "is_isolated": node_data["is_isolated"]
-#             }
-            
-#         # Compile active alerts based on health thresholds
-#         alerts = []
-#         for node_id, n_data in self.state.nodes.items():
-#             for symptom in n_data["visible_symptoms"]:
-#                 h = n_data["health"]
-#                 severity = "medium"
-#                 if isinstance(h, (int, float)):
-#                     if h < 0.2: severity = "critical"
-#                     elif h < 0.5: severity = "high"
-#                 alerts.append({"node": node_id, "type": symptom, "severity": severity})
-                
-#         alerts = sorted(alerts, key=lambda x: ["critical","high","medium"].index(x["severity"]))
-
-#         return {
-#             "step": self.state.step,
-#             "steps_remaining": self.state.steps_remaining,
-#             "system_health": self.state.system_health,
-#             "nodes": nodes_view,
-#             "active_alerts": alerts,
-#             "intervention_log": self.state.intervention_log,
-#             "cascade_risk": "high" if self.state.system_health < 0.4 else "medium" if self.state.system_health < 0.7 else "low"
-#         }
-
-#     def get_score(self) -> dict:
-#         """Calls the grader to evaluate the entire episode."""
-#         return self.grader.score(
-#             episode_trace=self.state.intervention_log,
-#             final_system_health=self.state.system_health,
-#             initial_system_health=self.initial_health
-#         )
-
-# server/cascade_debug_env_environment.py
-# import json
-# from typing import Dict, List, Optional
-# from .cascade_engine import propagate_failures
-# from .grader import CascadeGrader
-
-
-# class SystemState:
-#     """Internal tracker for the true state of the simulated microservices."""
-#     def __init__(self, scenario: dict):
-#         self.scenario_id = scenario["scenario_id"]
-#         self.step = 0
-#         self.steps_remaining = scenario["step_budget"]
-#         self.intervention_log = []
-#         self.done = False
-
-#         # Load initial nodes from the JSON scenario
-#         self.nodes = {}
-#         for node_id, data in scenario["initial_node_states"].items():
-#             self.nodes[node_id] = {
-#                 "status": data["status"],
-#                 "health": data["health"],
-#                 "observable": data["observable"],
-#                 "visible_symptoms": data.get("visible_symptoms", []),
-#                 "is_isolated": False
-#             }
-
-#     @property
-#     def system_health(self) -> float:
-#         healths = [n["health"] for n in self.nodes.values() if isinstance(n["health"], (int, float))]
 #         if not healths:
 #             return 0.0
 #         return round(sum(healths) / len(healths), 3)
@@ -4634,18 +4042,20 @@ if __name__ == "__main__":
 
 # class CascadeDebugEnvironment:
 #     """The main interface for the OpenEnv server to interact with."""
+
 #     def __init__(self, scenario_dict: dict):
 #         self.scenario_dict = scenario_dict
 #         self.state = SystemState(scenario_dict)
-#         self.grader = CascadeGrader(scenario_dict["scenario_id"], scenario_dict["ground_truth"])
+#         self.grader = CascadeGrader(
+#             scenario_dict["scenario_id"], scenario_dict["ground_truth"]
+#         )
 #         self.initial_health = self.state.system_health
 
-#         # Load pending failures from the scenario (e.g., slow memory leaks)
 #         self.pending_cascades = [
 #             {
 #                 "node_id": f["node"],
 #                 "failure_type": f["type"],
-#                 "steps_until_propagation": f.get("degradation_delay_steps", 0)
+#                 "steps_until_propagation": f.get("degradation_delay_steps", 0),
 #             }
 #             for f in scenario_dict.get("failure_injections", [])
 #         ]
@@ -4653,13 +4063,15 @@ if __name__ == "__main__":
 
 #     def step(self, action: str, target: str, failure_type: str = None) -> dict:
 #         """Executes a single step in the environment."""
+
+#         # FIX 1: Return proper structured dict on already-finished episode.
+#         # Old code returned {"error": "..."} — callers doing result.get("observation")
+#         # got None, then the Pydantic model tried to validate None as Observation → 500.
 #         if self.state.done:
-#             # BUG FIX: Return a proper structured response even on finished episodes
-#             # so callers can safely call .get("observation") and .get("done")
 #             return {
 #                 "observation": self.get_observation(),
 #                 "done": True,
-#                 "message": "Episode already finished."
+#                 "message": "Episode already finished.",
 #             }
 
 #         # --- Intercept for Hard H3 Decoy Wall ---
@@ -4671,17 +4083,19 @@ if __name__ == "__main__":
 #             )
 #             self.state.step += 1
 #             self.state.steps_remaining -= 1
-#             self.state.intervention_log.append({"action": action, "target": target, "result": msg})
+#             self.state.intervention_log.append(
+#                 {"action": action, "target": target, "result": msg}
+#             )
 
 #             if self.state.steps_remaining <= 0:
 #                 self.state.done = True
 
-#             # BUG FIX: This path previously returned a dict missing the standard structure.
-#             # Now returns the same shape as the normal path so app.py can handle it uniformly.
+#             # FIX 2: Return full standard shape — was missing "done" key in old code,
+#             # which caused app.py's result.get("done", False) to always return False.
 #             return {
 #                 "observation": self.get_observation(),
 #                 "done": self.state.done,
-#                 "message": msg
+#                 "message": msg,
 #             }
 
 #         # --- Process Normal Action ---
@@ -4697,7 +4111,7 @@ if __name__ == "__main__":
 #         if action == "observe":
 #             if target in self.state.nodes:
 #                 self.state.nodes[target]["observable"] = True
-#                 # Medium M3 Specific Log Reveal
+#                 # medium_m3: reveal TLS log on observing auth_service
 #                 if self.state.scenario_id == "medium_m3" and target == "auth_service":
 #                     injections = self.scenario_dict.get("failure_injections", [])
 #                     if injections and "log_entry_on_observe" in injections[0]:
@@ -4708,11 +4122,12 @@ if __name__ == "__main__":
 #                 self.state.nodes[target]["is_isolated"] = True
 
 #         elif action == "declare_root_cause":
-#             # BUG FIX: Guard against multiple declare calls ending the episode twice.
-#             # Only the first declaration marks done=True; state is already done afterwards.
+#             # FIX 3: Only set done=True on the FIRST declaration.
+#             # Multiple declarations (valid for hard_h1 dual-failure) no longer
+#             # re-trigger done on an already-finished episode.
 #             if not self.state.done:
 #                 self.state.done = True
-#                 log_entry["failure_type"] = failure_type
+#             log_entry["failure_type"] = failure_type
 
 #         self.state.intervention_log.append(log_entry)
 
@@ -4720,13 +4135,12 @@ if __name__ == "__main__":
 #         if self.state.steps_remaining <= 0 and not self.state.done:
 #             self.state.done = True
 
-#         # Run cascade engine to worsen (or recover) the system based on the action
-#         if not self.state.done:
-#             self.pending_cascades = propagate_failures(self.state, self.pending_cascades, self.last_action)
-#         else:
-#             # BUG FIX: Still run cascade engine on the terminal step so fix actions
-#             # applied in the last step are reflected in final_system_health for scoring.
-#             self.pending_cascades = propagate_failures(self.state, self.pending_cascades, self.last_action)
+#         # FIX 4: Run cascade engine even on the terminal step.
+#         # This ensures fix actions on the last step (e.g. rollback + declare in one step)
+#         # are reflected in final_system_health used by the grader's cascade_damage score.
+#         self.pending_cascades = propagate_failures(
+#             self.state, self.pending_cascades, self.last_action
+#         )
 
 #         return {"observation": self.get_observation(), "done": self.state.done}
 
@@ -4738,10 +4152,9 @@ if __name__ == "__main__":
 #                 "status": node_data["status"],
 #                 "health": node_data["health"] if node_data["observable"] else "hidden",
 #                 "visible_symptoms": node_data["visible_symptoms"],
-#                 "is_isolated": node_data["is_isolated"]
+#                 "is_isolated": node_data["is_isolated"],
 #             }
 
-#         # Compile active alerts based on health thresholds
 #         alerts = []
 #         for node_id, n_data in self.state.nodes.items():
 #             for symptom in n_data["visible_symptoms"]:
@@ -4754,7 +4167,10 @@ if __name__ == "__main__":
 #                         severity = "high"
 #                 alerts.append({"node": node_id, "type": symptom, "severity": severity})
 
-#         alerts = sorted(alerts, key=lambda x: ["critical", "high", "medium"].index(x["severity"]))
+#         alerts = sorted(
+#             alerts,
+#             key=lambda x: ["critical", "high", "medium"].index(x["severity"]),
+#         )
 
 #         return {
 #             "step": self.state.step,
@@ -4764,37 +4180,30 @@ if __name__ == "__main__":
 #             "active_alerts": alerts,
 #             "intervention_log": self.state.intervention_log,
 #             "cascade_risk": (
-#                 "high" if self.state.system_health < 0.4
-#                 else "medium" if self.state.system_health < 0.7
+#                 "high"
+#                 if self.state.system_health < 0.4
+#                 else "medium"
+#                 if self.state.system_health < 0.7
 #                 else "low"
-#             )
+#             ),
 #         }
 
 #     def get_score(self) -> dict:
 #         """Calls the grader to evaluate the entire episode."""
-#         # BUG FIX: Raise clearly if called before episode ends.
-#         # The /step endpoint was catching this silently and returning reward=0.0 mid-episode.
+#         # FIX 5: Raise explicitly when called before episode ends.
+#         # app.py /step used to catch this silently and return reward=0.0,
+#         # hiding the real score and always showing 0 reward mid-episode.
 #         if not self.state.done:
-#             raise RuntimeError("Cannot score an episode that is not yet complete.")
+#             raise RuntimeError(
+#                 "Cannot score an episode that is not yet complete. "
+#                 "Call declare_root_cause or exhaust the step budget first."
+#             )
 #         return self.grader.score(
 #             episode_trace=self.state.intervention_log,
 #             final_system_health=self.state.system_health,
-#             initial_system_health=self.initial_health
+#             initial_system_health=self.initial_health,
 #         )
 
-# server/cascade_debug_env_environment.py
-# FIXES applied:
-#   1. step() on a finished episode: returns proper structured dict
-#      {observation, done, message} instead of {"error": "..."} — callers
-#      calling .get("observation") on the error dict got None.
-#   2. hard_h3 decoy wall path: now returns the same dict shape as the normal
-#      path so app.py /step can handle it uniformly (was missing "reward").
-#   3. declare_root_cause guard: if state is already done, the action is
-#      logged but done is NOT set again (prevents double-terminal edge case).
-#   4. cascade engine is called on the terminal step too, so fix actions on
-#      the last step are reflected in final_system_health for grader scoring.
-#   5. get_score() raises RuntimeError if episode not done, instead of silently
-#      returning garbage — prevents /step from caching bad reward values.
 
 import json
 from typing import Dict, List, Optional
@@ -4858,9 +4267,6 @@ class CascadeDebugEnvironment:
     def step(self, action: str, target: str, failure_type: str = None) -> dict:
         """Executes a single step in the environment."""
 
-        # FIX 1: Return proper structured dict on already-finished episode.
-        # Old code returned {"error": "..."} — callers doing result.get("observation")
-        # got None, then the Pydantic model tried to validate None as Observation → 500.
         if self.state.done:
             return {
                 "observation": self.get_observation(),
@@ -4884,8 +4290,6 @@ class CascadeDebugEnvironment:
             if self.state.steps_remaining <= 0:
                 self.state.done = True
 
-            # FIX 2: Return full standard shape — was missing "done" key in old code,
-            # which caused app.py's result.get("done", False) to always return False.
             return {
                 "observation": self.get_observation(),
                 "done": self.state.done,
@@ -4916,9 +4320,6 @@ class CascadeDebugEnvironment:
                 self.state.nodes[target]["is_isolated"] = True
 
         elif action == "declare_root_cause":
-            # FIX 3: Only set done=True on the FIRST declaration.
-            # Multiple declarations (valid for hard_h1 dual-failure) no longer
-            # re-trigger done on an already-finished episode.
             if not self.state.done:
                 self.state.done = True
             log_entry["failure_type"] = failure_type
@@ -4929,9 +4330,6 @@ class CascadeDebugEnvironment:
         if self.state.steps_remaining <= 0 and not self.state.done:
             self.state.done = True
 
-        # FIX 4: Run cascade engine even on the terminal step.
-        # This ensures fix actions on the last step (e.g. rollback + declare in one step)
-        # are reflected in final_system_health used by the grader's cascade_damage score.
         self.pending_cascades = propagate_failures(
             self.state, self.pending_cascades, self.last_action
         )
@@ -4984,9 +4382,6 @@ class CascadeDebugEnvironment:
 
     def get_score(self) -> dict:
         """Calls the grader to evaluate the entire episode."""
-        # FIX 5: Raise explicitly when called before episode ends.
-        # app.py /step used to catch this silently and return reward=0.0,
-        # hiding the real score and always showing 0 reward mid-episode.
         if not self.state.done:
             raise RuntimeError(
                 "Cannot score an episode that is not yet complete. "
