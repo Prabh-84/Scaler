@@ -4,4 +4,4 @@ build/
 dist/
 chaos-frontend/node_modules/
 .next/
-docs/*.png
+
