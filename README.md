@@ -230,7 +230,7 @@ It is essentially a **debugging environment for AI agents in distributed systems
 --- -->
 
 
-<!-- ---
+---
 title: CascadeDebugEnv
 emoji: 🐙
 colorFrom: yellow
@@ -459,11 +459,11 @@ Cascade Debug Environment is a **distributed system failure simulation** where a
 
 It is essentially a **debugging environment for AI agents in distributed systems**.
 
---- -->
+---
 
 
 
-# SAGE — CascadeDebugEnv
+<!-- # SAGE — CascadeDebugEnv
 
 ### Mastering Chaos: AI-Powered Root Cause Analysis in Distributed Systems
 
@@ -817,4 +817,4 @@ The frontend interacts via same-domain API calls. The backend serves both the RE
 
 ---
 
-*SAGE is not just an environment. It is a test of whether AI agents can move beyond reactive behavior and perform true system-level reasoning under uncertainty.*
+*SAGE is not just an environment. It is a test of whether AI agents can move beyond reactive behavior and perform true system-level reasoning under uncertainty.* -->
