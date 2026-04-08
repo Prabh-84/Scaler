@@ -475,7 +475,7 @@ It is essentially a **debugging environment for AI agents in distributed systems
 
 ---
 
-![image]("C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\docs\scal1.png")
+![image](docs/scal1.png)
 
 ## Quick Start
 
@@ -509,11 +509,11 @@ This environment tests one specific capability: **can an agent trace a failure b
 
 **System Topology View** — partial observability in action. The agent sees what's degraded, not why.
 
-![System Topology](C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\docs\scal2.png)
+![System Topology](docs/scal2.png)
 
 **Remediation Panel** — actions are real, irreversible, and carry trap risk. Agent path history is tracked on the right.
 
-![Remediation Panel](C:\Users\LENOVO\Desktop\scalar\cascade_debug_env\docs\scal3.png)
+![Remediation Panel](docs/scal3.png)
 
 ---
 
