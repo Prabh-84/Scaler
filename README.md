@@ -21,6 +21,7 @@ short_description: Root-cause analysis in deceptive microservice failures.
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-green)](https://huggingface.co/spaces/Lakshay2005/Cascade_env)
 
 ---
+![image](docs/scal1.png)
 
 ## Quick Start
 
@@ -148,6 +149,7 @@ The reward function is intentionally non-trivial: an agent that correctly identi
 ---
 
 ## Action Space
+![image](docs/scal4.png)
 
 | Action | Description |
 |---|---|
