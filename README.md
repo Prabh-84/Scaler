@@ -1,235 +1,3 @@
-<!-- ---
-title: CascadeDebugEnv
-emoji: 🐙
-colorFrom: yellow
-colorTo: red
-sdk: docker
-app_port: 7860
-pinned: false
-license: mit
-short_description: Cascading failure diagnosis environment for SRE agents
----
-
-
-# Cascade Debug Environment
-
-### Root Cause Discovery in Distributed Microservice Failures
-
-## Overview
-
-Cascade Debug Environment is a simulated distributed microservice system where failures propagate across services.
-An AI agent interacts with the system, investigates failures, performs interventions, and must identify the **original root cause** before running out of steps.
-
-The environment is designed so that **fixing the obvious broken service is often wrong** — the real issue is usually upstream.
-
-This project simulates real-world **SRE debugging, incident response, and cascading system failures**.
-
----
-
-## Problem Statement
-
-In distributed systems:
-
-* One service fails
-* Other services start failing
-* Alerts point to multiple services
-* Restarting broken services may not fix the system
-* The real issue is often a database, cache, deployment, or configuration
-
-This environment tests whether an agent can:
-
-1. Observe the system
-2. Understand dependencies
-3. Avoid traps
-4. Identify the root cause
-5. Minimize cascade damage
-
----
-
-## Features
-
-* Simulated microservice architecture
-* Failure propagation engine
-* Hidden node health and observability
-* Step budget (limited actions)
-* Trap actions and decoy failures
-* Multiple difficulty scenarios
-* Scoring system for agent performance
-* FastAPI environment server
-* LLM-powered debugging agent
-* Frontend visualization dashboard (Topology, Logs, Node Details)
-
----
-
-## System Architecture
-
-The simulated system includes services like:
-
-* API Gateway
-* Auth Service
-* Product Service
-* Order Service
-* User DB
-* Postgres Primary & Replica
-* Redis Cache
-* CDN Cache
-* Payment Gateway
-
-Failures propagate through service dependencies, causing **cascade failures** across the system.
-
----
-
-## Scenarios
-
-Scenarios are stored in the `scenarios/` folder and include:
-
-* Easy scenarios (single failure)
-* Medium scenarios (traps and misleading alerts)
-* Hard scenarios (multiple failures, retry storms, hidden root causes)
-
-Each scenario defines:
-
-* Initial system state
-* Failure injections
-* Step budget
-* Trap actions
-* Ground truth root cause
-
----
-
-## Available Actions
-
-The agent can perform the following actions:
-
-| Action             | Purpose                            |
-| ------------------ | ---------------------------------- |
-| observe            | Reveal hidden health/logs          |
-| restart            | Restart a service                  |
-| isolate            | Isolate a service                  |
-| rollback           | Rollback deployment                |
-| drain_connections  | Drain DB/service connections       |
-| reroute_traffic    | Redirect traffic                   |
-| scale_replica      | Scale service                      |
-| declare_root_cause | End episode and declare root cause |
-
----
-
-## Scoring System
-
-The agent is evaluated on:
-
-| Metric              | Description                   |
-| ------------------- | ----------------------------- |
-| Root Cause Accuracy | Correct root cause identified |
-| Intervention Order  | Observed before acting        |
-| Cascade Damage      | System health preserved       |
-| Step Efficiency     | Solved in fewer steps         |
-
-Final score is a weighted combination of these metrics.
-
----
-
-## Project Structure
-
-```
-cascade_debug_env/
-│
-├── chaos-frontend/        # Frontend visualization (Next.js)
-│   ├── app/
-│   ├── components/
-│   └── lib/
-│
-├── scenarios/             # Failure scenarios
-│
-├── server/                # Environment engine
-│   ├── app.py
-│   ├── cascade_engine.py
-│   ├── cascade_debug_env_environment.py
-│   └── grader.py
-│
-├── client.py              # LLM agent client
-├── inference.py           # Agent inference runner
-├── models.py
-├── Dockerfile
-├── requirements.txt
-├── openenv.yaml
-└── README.md
-```
-
----
-
-## Running the Project
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Start Environment Server
-
-```bash
-uvicorn server.app:app --reload --port 8000
-```
-
-### 3. Run AI Agent
-
-```bash
-python client.py
-```
-
-### 4. Run Frontend
-
-```bash
-cd chaos-frontend
-npm install
-npm run dev
-```
-
----
-
-## API Endpoints
-
-| Endpoint      | Description        |
-| ------------- | ------------------ |
-| GET /         | Health check       |
-| GET /tasks    | List scenarios     |
-| POST /reset   | Start scenario     |
-| GET /state    | Get system state   |
-| POST /step    | Execute action     |
-| GET /grader   | Get final score    |
-| GET /baseline | Run baseline agent |
-
----
-
-## What This Project Demonstrates
-
-* Distributed systems debugging
-* Failure propagation modeling
-* Root cause analysis
-* AI agent decision making
-* Incident response simulation
-* Observability and SRE workflows
-* Reinforcement learning environment design
-
----
-
-## Summary
-
-Cascade Debug Environment is a **distributed system failure simulation** where an AI agent must:
-
-* Investigate failures
-* Understand service dependencies
-* Avoid misleading signals
-* Identify the true root cause
-* Minimize system damage
-* Solve within limited steps
-
-It is essentially a **debugging environment for AI agents in distributed systems**.
-
---- -->
-
-
 ---
 title: CascadeDebugEnv
 emoji: 🐙
@@ -237,233 +5,12 @@ colorFrom: yellow
 colorTo: red
 sdk: docker
 app_port: 7860
+app_file: app.py
 pinned: false
-license: mit
-short_description: Cascading failure diagnosis environment for SRE agents
+short_description: OpenEnv benchmark for causal root-cause analysis in deceptive microservice failures.
 ---
 
-
-# Cascade Debug Environment
-
-### Root Cause Discovery in Distributed Microservice Failures
-
-## Overview
-
-Cascade Debug Environment is a simulated distributed microservice system where failures propagate across services.
-An AI agent interacts with the system, investigates failures, performs interventions, and must identify the **original root cause** before running out of steps.
-
-The environment is designed so that **fixing the obvious broken service is often wrong** — the real issue is usually upstream.
-
-This project simulates real-world **SRE debugging, incident response, and cascading system failures**.
-
----
-
-## Problem Statement
-
-In distributed systems:
-
-* One service fails
-* Other services start failing
-* Alerts point to multiple services
-* Restarting broken services may not fix the system
-* The real issue is often a database, cache, deployment, or configuration
-
-This environment tests whether an agent can:
-
-1. Observe the system
-2. Understand dependencies
-3. Avoid traps
-4. Identify the root cause
-5. Minimize cascade damage
-
----
-
-## Features
-
-* Simulated microservice architecture
-* Failure propagation engine
-* Hidden node health and observability
-* Step budget (limited actions)
-* Trap actions and decoy failures
-* Multiple difficulty scenarios
-* Scoring system for agent performance
-* FastAPI environment server
-* LLM-powered debugging agent
-* Frontend visualization dashboard (Topology, Logs, Node Details)
-
----
-
-## System Architecture
-
-The simulated system includes services like:
-
-* API Gateway
-* Auth Service
-* Product Service
-* Order Service
-* User DB
-* Postgres Primary & Replica
-* Redis Cache
-* CDN Cache
-* Payment Gateway
-
-Failures propagate through service dependencies, causing **cascade failures** across the system.
-
----
-
-## Scenarios
-
-Scenarios are stored in the `scenarios/` folder and include:
-
-* Easy scenarios (single failure)
-* Medium scenarios (traps and misleading alerts)
-* Hard scenarios (multiple failures, retry storms, hidden root causes)
-
-Each scenario defines:
-
-* Initial system state
-* Failure injections
-* Step budget
-* Trap actions
-* Ground truth root cause
-
----
-
-## Available Actions
-
-The agent can perform the following actions:
-
-| Action             | Purpose                            |
-| ------------------ | ---------------------------------- |
-| observe            | Reveal hidden health/logs          |
-| restart            | Restart a service                  |
-| isolate            | Isolate a service                  |
-| rollback           | Rollback deployment                |
-| drain_connections  | Drain DB/service connections       |
-| reroute_traffic    | Redirect traffic                   |
-| scale_replica      | Scale service                      |
-| declare_root_cause | End episode and declare root cause |
-
----
-
-## Scoring System
-
-The agent is evaluated on:
-
-| Metric              | Description                   |
-| ------------------- | ----------------------------- |
-| Root Cause Accuracy | Correct root cause identified |
-| Intervention Order  | Observed before acting        |
-| Cascade Damage      | System health preserved       |
-| Step Efficiency     | Solved in fewer steps         |
-
-Final score is a weighted combination of these metrics.
-
----
-
-## Project Structure
-
-```
-cascade_debug_env/
-│
-├── chaos-frontend/        # Frontend visualization (Next.js)
-│   ├── app/
-│   ├── components/
-│   └── lib/
-│
-├── scenarios/             # Failure scenarios
-│
-├── server/                # Environment engine
-│   ├── app.py
-│   ├── cascade_engine.py
-│   ├── cascade_debug_env_environment.py
-│   └── grader.py
-│
-├── client.py              # LLM agent client
-├── inference.py           # Agent inference runner
-├── models.py
-├── Dockerfile
-├── requirements.txt
-├── openenv.yaml
-└── README.md
-```
-
----
-
-## Running the Project
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Start Environment Server
-
-```bash
-uvicorn server.app:app --reload --port 8000
-```
-
-### 3. Run AI Agent
-
-```bash
-python client.py
-```
-
-### 4. Run Frontend
-
-```bash
-cd chaos-frontend
-npm install
-npm run dev
-```
-
----
-
-## API Endpoints
-
-| Endpoint      | Description        |
-| ------------- | ------------------ |
-| GET /         | Health check       |
-| GET /tasks    | List scenarios     |
-| POST /reset   | Start scenario     |
-| GET /state    | Get system state   |
-| POST /step    | Execute action     |
-| GET /grader   | Get final score    |
-| GET /baseline | Run baseline agent |
-
----
-
-## What This Project Demonstrates
-
-* Distributed systems debugging
-* Failure propagation modeling
-* Root cause analysis
-* AI agent decision making
-* Incident response simulation
-* Observability and SRE workflows
-* Reinforcement learning environment design
-
----
-
-## Summary
-
-Cascade Debug Environment is a **distributed system failure simulation** where an AI agent must:
-
-* Investigate failures
-* Understand service dependencies
-* Avoid misleading signals
-* Identify the true root cause
-* Minimize system damage
-* Solve within limited steps
-
-It is essentially a **debugging environment for AI agents in distributed systems**.
-
----
-
-
-
-<!-- # SAGE — CascadeDebugEnv
+# SAGE — CascadeDebugEnv
 
 ### Mastering Chaos: AI-Powered Root Cause Analysis in Distributed Systems
 
@@ -475,14 +22,12 @@ It is essentially a **debugging environment for AI agents in distributed systems
 
 ---
 
-![image](docs/scal1.png)
-
 ## Quick Start
 
 ```bash
 docker build -t cascade-debug-env .
 docker run -p 7860:7860 \
-  -e API_BASE_URL=https://router.huggingface.co/v1 \
+  -e API_BASE_URL=[https://router.huggingface.co/v1](https://router.huggingface.co/v1) \
   -e API_KEY=your_key \
   -e MODEL_NAME=meta-llama/Llama-3.3-70B-Instruct \
   -e HF_TOKEN=your_hf_token \
@@ -497,9 +42,9 @@ docker run -p 7860:7860 \
 
 Every scenario is handcrafted from realistic SRE failure patterns in distributed systems:
 
-- A TLS certificate expires on `auth_service`, but the process reports healthy — so every downstream service silently times out
-- A missing database index creates a retry storm that makes `order_service` look like the culprit, when the real problem is `postgres_primary`
-- A completely dead `payment_gateway` is a red herring — the actual connection leak is in `user_db`, hidden behind it
+* A TLS certificate expires on `auth_service`, but the process reports healthy — so every downstream service silently times out
+* A missing database index creates a retry storm that makes `order_service` look like the culprit, when the real problem is `postgres_primary`
+* A completely dead `payment_gateway` is a red herring — the actual connection leak is in `user_db`, hidden behind it
 
 This environment tests one specific capability: **can an agent trace a failure back to its cause, rather than treating the symptom closest to the surface?**
 
@@ -523,7 +68,7 @@ This environment tests one specific capability: **can an agent trace a failure b
 
 Nine services connected by live dependency edges:
 
-```
+```text
 api_gateway
 ├── auth_service
 │   └── user_db
@@ -547,9 +92,9 @@ Nodes start as either `observable` or `unknown`. The agent can only see the true
 
 Every scenario contains documented trap actions — interventions that look reasonable but are wrong:
 
-- Restarting the most visibly broken service when it is just a symptom
-- Draining connections from `postgres_primary` when `redis_cache` is the actual root cause
-- Observing `payment_gateway` when it is a deliberate decoy
+* Restarting the most visibly broken service when it is just a symptom
+* Draining connections from `postgres_primary` when `redis_cache` is the actual root cause
+* Observing `payment_gateway` when it is a deliberate decoy
 
 Trap actions incur significant penalties. Declaring the wrong root cause heavily reduces the final score.
 
@@ -683,8 +228,8 @@ Unobserved nodes show `"health": "hidden"` and `"status": "unknown"`. The observ
 
 **Environment variables required:**
 
-```
-API_BASE_URL=<LiteLLM proxy URL>   # default: https://router.huggingface.co/v1
+```bash
+API_BASE_URL=<LiteLLM proxy URL>   # default: [https://router.huggingface.co/v1](https://router.huggingface.co/v1)
 API_KEY=<proxy key>                # injected by validator
 MODEL_NAME=<model identifier>      # default: meta-llama/Llama-3.3-70B-Instruct
 HF_TOKEN=<your HF token>
@@ -692,7 +237,7 @@ HF_TOKEN=<your HF token>
 
 **Stdout log format (exact):**
 
-```
+```text
 [START] task=easy_e1 env=CascadeDebugEnv model=meta-llama/Llama-3.3-70B-Instruct
 [STEP] step=1 action=observe:auth_service reward=0.00 done=false error=null
 [STEP] step=2 action=rollback:auth_service reward=0.00 done=false error=null
@@ -722,7 +267,7 @@ uvicorn app:app --host 0.0.0.0 --port 7860
 ```bash
 docker build -t cascade-debug-env .
 docker run -p 7860:7860 \
-  -e API_BASE_URL=https://router.huggingface.co/v1 \
+  -e API_BASE_URL=[https://router.huggingface.co/v1](https://router.huggingface.co/v1) \
   -e API_KEY=your_key \
   -e MODEL_NAME=meta-llama/Llama-3.3-70B-Instruct \
   -e HF_TOKEN=your_hf_token \
@@ -732,7 +277,7 @@ docker run -p 7860:7860 \
 ### Run the Baseline
 
 ```bash
-export API_BASE_URL=https://router.huggingface.co/v1
+export API_BASE_URL=[https://router.huggingface.co/v1](https://router.huggingface.co/v1)
 export API_KEY=your_key
 export HF_TOKEN=your_hf_token
 python inference.py
@@ -742,7 +287,7 @@ python inference.py
 
 ## Project Structure
 
-```
+```text
 .
 ├── app.py                    # Root FastAPI server (OpenEnv entry point)
 ├── inference.py              # Baseline LLM agent
@@ -769,52 +314,14 @@ python inference.py
 
 ---
 
-## Why This Environment Is Useful for Agent Evaluation
-
-Most RL and LLM agent benchmarks test whether a model can retrieve facts or follow instructions. CascadeDebugEnv tests something different: **causal reasoning under incomplete information**.
-
-Three properties make this hard for current models:
-
-**1. Symptoms are deliberately misleading.** The most broken-looking node is usually not the root cause. An agent that acts on what it sees first will fail every medium and hard scenario.
-
-**2. Observability must be earned.** Agents cannot see node health until they spend an action to observe it. This forces sequential, strategic exploration rather than one-shot pattern matching.
-
-**3. Traps punish shallow reasoning.** Restarting a visibly dead service, scaling replicas to handle load, draining connections from a node that is itself a victim — all are penalized. The environment specifically rewards agents that trace the failure back through the dependency graph rather than treating the first symptom they see.
-
-This makes the environment useful for evaluating and training agents on:
-
-- Multi-step causal inference
-- Strategic information gathering under step constraints
-- Resistance to adversarial and misleading observations
-- Structured sequential decision-making in partially observable environments
-
----
-
-## Architecture
-
-```
-Frontend (Next.js, static export)
-         ↓
-FastAPI Backend (OpenEnv server)
-         ↓
-Environment Engine (CascadeDebugEnv)
-         ↓
-Scenario + Grader Logic
-```
-
-The frontend interacts via same-domain API calls. The backend serves both the REST API and the static UI. The system is fully containerized and runs on HuggingFace Spaces with no external dependencies at inference time.
-
----
-
 ## Team SAGE
 
-
-| Name | 
+| Name |
 |---|
-| Anika Soni |  
-| Prabhjot Singh | 
-| Lakshay Mittal | 
+| Anika Soni |
+| Prabhjot Singh |
+| Lakshay Mittal |
 
 ---
 
-*SAGE is not just an environment. It is a test of whether AI agents can move beyond reactive behavior and perform true system-level reasoning under uncertainty.* -->
+*SAGE is not just an environment. It is a test of whether AI agents can move beyond reactive behavior and perform true system-level reasoning under uncertainty.*
